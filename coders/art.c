@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -139,8 +139,6 @@ static Image *ReadARTImage(const ImageInfo *image_info,ExceptionInfo *exception)
   image->columns=(size_t) ReadBlobLSBShort(image);
   (void) ReadBlobLSBShort(image);
   image->rows=(size_t) ReadBlobLSBShort(image);
-  if ((image->columns == 0) || (image->rows == 0))
-    ThrowReaderException(CorruptImageError,"ImproperImageHeader");
   if (image_info->ping != MagickFalse)
     {
       (void) CloseBlob(image);

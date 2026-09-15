@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -769,7 +769,7 @@ MagickExport MagickBooleanType LoadFontConfigFonts(SplayTreeInfo *type_cache,
   font_config=FcConfigGetCurrent();
   if (font_config == (FcConfig *) NULL)
     return(MagickFalse);
-  FcConfigSetRescanInterval(font_config,0);
+  (void) FcConfigSetRescanInterval(font_config,0);
   font_set=(FcFontSet *) NULL;
   object_set=FcObjectSetBuild(FC_FULLNAME,FC_FAMILY,FC_STYLE,FC_SLANT,
     FC_WIDTH,FC_WEIGHT,FC_FILE,FC_INDEX,(char *) NULL);
@@ -939,6 +939,7 @@ MagickExport MagickBooleanType ListTypeInfo(FILE *file,ExceptionInfo *exception)
   const char
     *family,
     *glyphs,
+    *metrics,
     *name,
     *path,
     *stretch,
@@ -969,23 +970,27 @@ MagickExport MagickBooleanType ListTypeInfo(FILE *file,ExceptionInfo *exception)
          (type_info[i]->path != (char *) NULL))
       (void) FormatLocaleFile(file,"\nPath: %s\n",type_info[i]->path);
     path=type_info[i]->path;
-    name="unknown";
+    name="not defined";
     if (type_info[i]->name != (char *) NULL)
       name=type_info[i]->name;
-    family="unknown";
+    family="not defined";
     if (type_info[i]->family != (char *) NULL)
       family=type_info[i]->family;
     style=CommandOptionToMnemonic(MagickStyleOptions,type_info[i]->style);
     stretch=CommandOptionToMnemonic(MagickStretchOptions,type_info[i]->stretch);
-    glyphs="unknown";
+    metrics="not defined";
+    if (type_info[i]->metrics != (char *) NULL)
+      metrics=type_info[i]->metrics;
+    glyphs="not defined";
     if (type_info[i]->glyphs != (char *) NULL)
       glyphs=type_info[i]->glyphs;
     (void) FormatLocaleFile(file,"  Font: %s\n",name);
     (void) FormatLocaleFile(file,"    family: %s\n",family);
     (void) FormatLocaleFile(file,"    style: %s\n",style);
     (void) FormatLocaleFile(file,"    stretch: %s\n",stretch);
-    (void) FormatLocaleFile(file,"    weight: %.20g\n",(double)
+    (void) FormatLocaleFile(file,"    weight: %.17g\n",(double)
       type_info[i]->weight);
+    (void) FormatLocaleFile(file,"    metrics: %s\n",metrics);
     (void) FormatLocaleFile(file,"    glyphs: %s\n",glyphs);
     (void) FormatLocaleFile(file,"    index: %d\n",(int)
       type_info[i]->face);
@@ -1115,12 +1120,41 @@ static MagickBooleanType LoadTypeCache(SplayTreeInfo *cache,const char *xml,
     (void) CopyMagickString(keyword,token,MagickPathExtent);
     if (LocaleNCompare(keyword,"<!DOCTYPE",9) == 0)
       {
+        int
+          bracket_depth = 0,
+          quote = 0;
+
         /*
-          Doctype element.
+          DOCTYPE element.
         */
-        while ((LocaleNCompare(q,"]>",2) != 0) && (*q != '\0'))
-          (void) GetNextToken(q,&q,extent,token);
-        continue;
+        for ( ; *q != '\0'; q++)
+        {
+          if (quote != 0)
+            {
+              if (*q == quote)
+                quote=0;
+            }
+          else
+            {
+              if ((*q == '"') || (*q == '\''))
+                quote=(*q);
+              else
+                if (*q == '[')
+                  bracket_depth++;
+                else
+                  if (*q == ']')
+                    {
+                      if (bracket_depth > 0)
+                        bracket_depth--;
+                    }
+                  else
+                    if ((*q == '>') && (bracket_depth == 0))
+                      {
+                        q++;   /* consume final '>' */
+                        break;
+                      }
+            }
+        }
       }
     if (LocaleNCompare(keyword,"<!--",4) == 0)
       {
@@ -1255,8 +1289,7 @@ static MagickBooleanType LoadTypeCache(SplayTreeInfo *cache,const char *xml,
       {
         if (LocaleCompare((char *) keyword,"glyphs") == 0)
           {
-            if (SetTypeNodePath(filename,font_path,token,&type_info->glyphs) ==
-                MagickFalse)
+            if (SetTypeNodePath(filename,font_path,token,&type_info->glyphs) == MagickFalse)
               type_info=(TypeInfo *) DestroyTypeNode(type_info);
             break;
           }
@@ -1267,8 +1300,7 @@ static MagickBooleanType LoadTypeCache(SplayTreeInfo *cache,const char *xml,
       {
         if (LocaleCompare((char *) keyword,"metrics") == 0)
           {
-            if (SetTypeNodePath(filename,font_path,token,&type_info->metrics) ==
-                MagickFalse)
+            if (SetTypeNodePath(filename,font_path,token,&type_info->metrics) == MagickFalse)
               type_info=(TypeInfo *) DestroyTypeNode(type_info);
             break;
           }

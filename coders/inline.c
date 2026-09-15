@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -211,11 +211,13 @@ ModuleExport size_t RegisterINLINEImage(void)
   entry->decoder=(DecodeImageHandler *) ReadINLINEImage;
   entry->encoder=(EncodeImageHandler *) WriteINLINEImage;
   entry->format_type=ImplicitFormatType;
+  entry->flags|=CoderExplicitAllowedFlag;
   (void) RegisterMagickInfo(entry);
   entry=AcquireMagickInfo("INLINE","INLINE","Base64-encoded inline images");
   entry->decoder=(DecodeImageHandler *) ReadINLINEImage;
   entry->encoder=(EncodeImageHandler *) WriteINLINEImage;
   entry->format_type=ImplicitFormatType;
+  entry->flags|=CoderExplicitAllowedFlag;
   (void) RegisterMagickInfo(entry);
   return(MagickImageCoderSignature);
 }
@@ -316,7 +318,7 @@ static MagickBooleanType WriteINLINEImage(const ImageInfo *image_info,
       (GetMagickMimeType(magick_info) == (const char *) NULL))
     {
       write_info=DestroyImageInfo(write_info);
-      ThrowWriterException(CorruptImageError,"ImageTypeNotSupported");
+      ThrowWriterException(ImageError,"ImageTypeNotSupported");
     }
   (void) CopyMagickString(image->filename,write_info->filename,
     MagickPathExtent);

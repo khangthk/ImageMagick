@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -125,6 +125,7 @@ static Image *ReadBGRImage(const ImageInfo *image_info,ExceptionInfo *exception)
     length;
 
   ssize_t
+    columns,
     count,
     y;
 
@@ -203,6 +204,7 @@ static Image *ReadBGRImage(const ImageInfo *image_info,ExceptionInfo *exception)
   scene=0;
   status=MagickTrue;
   stream=NULL;
+  columns=(ssize_t) MagickMin(image->columns,canvas_image->columns);
   do
   {
     /*
@@ -264,7 +266,7 @@ static Image *ReadBGRImage(const ImageInfo *image_info,ExceptionInfo *exception)
               if ((p == (const Quantum *) NULL) ||
                   (q == (Quantum *) NULL))
                 break;
-              for (x=0; x < (ssize_t) image->columns; x++)
+              for (x=0; x < columns; x++)
               {
                 SetPixelRed(image,GetPixelRed(canvas_image,p),q);
                 SetPixelGreen(image,GetPixelGreen(canvas_image,p),q);
@@ -272,8 +274,8 @@ static Image *ReadBGRImage(const ImageInfo *image_info,ExceptionInfo *exception)
                 SetPixelAlpha(image,OpaqueAlpha,q);
                 if (image->alpha_trait != UndefinedPixelTrait)
                   SetPixelAlpha(image,GetPixelAlpha(canvas_image,p),q);
-                p+=GetPixelChannels(canvas_image);
-                q+=GetPixelChannels(image);
+                p+=(ptrdiff_t) GetPixelChannels(canvas_image);
+                q+=(ptrdiff_t) GetPixelChannels(image);
               }
               if (SyncAuthenticPixels(image,exception) == MagickFalse)
                 break;
@@ -310,24 +312,24 @@ static Image *ReadBGRImage(const ImageInfo *image_info,ExceptionInfo *exception)
           }
         for (y=0; y < (ssize_t) image->extract_info.height; y++)
         {
-          const Quantum
-            *magick_restrict p;
-
-          Quantum
-            *magick_restrict q;
-
-          ssize_t
-            x;
-
-          if (count != (ssize_t) length)
-            {
-              status=MagickFalse;
-              ThrowFileException(exception,CorruptImageError,
-                "UnexpectedEndOfFile",image->filename);
-              break;
-            }
           for (i=0; i < (ssize_t) (image->alpha_trait != UndefinedPixelTrait ? 4 : 3); i++)
           {
+            const Quantum
+              *magick_restrict p;
+
+            Quantum
+              *magick_restrict q;
+
+            ssize_t
+              x;
+
+            if (count != (ssize_t) length)
+              {
+                status=MagickFalse;
+                ThrowFileException(exception,CorruptImageError,
+                  "UnexpectedEndOfFile",image->filename);
+                break;
+              }
             quantum_type=quantum_types[i];
             q=GetAuthenticPixels(canvas_image,0,0,canvas_image->columns,1,
               exception);
@@ -347,7 +349,7 @@ static Image *ReadBGRImage(const ImageInfo *image_info,ExceptionInfo *exception)
                 if ((p == (const Quantum *) NULL) ||
                     (q == (Quantum *) NULL))
                   break;
-                for (x=0; x < (ssize_t) image->columns; x++)
+                for (x=0; x < columns; x++)
                 {
                   switch (quantum_type)
                   {
@@ -379,8 +381,8 @@ static Image *ReadBGRImage(const ImageInfo *image_info,ExceptionInfo *exception)
                     default:
                       break;
                   }
-                  p+=GetPixelChannels(canvas_image);
-                  q+=GetPixelChannels(image);
+                  p+=(ptrdiff_t) GetPixelChannels(canvas_image);
+                  q+=(ptrdiff_t) GetPixelChannels(image);
                 }
                 if (SyncAuthenticPixels(image,exception) == MagickFalse)
                   break;
@@ -443,11 +445,11 @@ static Image *ReadBGRImage(const ImageInfo *image_info,ExceptionInfo *exception)
               if ((p == (const Quantum *) NULL) ||
                   (q == (Quantum *) NULL))
                 break;
-              for (x=0; x < (ssize_t) image->columns; x++)
+              for (x=0; x < columns; x++)
               {
                 SetPixelRed(image,GetPixelRed(canvas_image,p),q);
-                p+=GetPixelChannels(canvas_image);
-                q+=GetPixelChannels(image);
+                p+=(ptrdiff_t) GetPixelChannels(canvas_image);
+                q+=(ptrdiff_t) GetPixelChannels(image);
               }
               if (SyncAuthenticPixels(image,exception) == MagickFalse)
                 break;
@@ -496,11 +498,11 @@ static Image *ReadBGRImage(const ImageInfo *image_info,ExceptionInfo *exception)
               if ((p == (const Quantum *) NULL) ||
                   (q == (Quantum *) NULL))
                 break;
-              for (x=0; x < (ssize_t) image->columns; x++)
+              for (x=0; x < columns; x++)
               {
                 SetPixelGreen(image,GetPixelGreen(canvas_image,p),q);
-                p+=GetPixelChannels(canvas_image);
-                q+=GetPixelChannels(image);
+                p+=(ptrdiff_t) GetPixelChannels(canvas_image);
+                q+=(ptrdiff_t) GetPixelChannels(image);
               }
               if (SyncAuthenticPixels(image,exception) == MagickFalse)
                 break;
@@ -549,11 +551,11 @@ static Image *ReadBGRImage(const ImageInfo *image_info,ExceptionInfo *exception)
               if ((p == (const Quantum *) NULL) ||
                   (q == (Quantum *) NULL))
                 break;
-              for (x=0; x < (ssize_t) image->columns; x++)
+              for (x=0; x < columns; x++)
               {
                 SetPixelBlue(image,GetPixelBlue(canvas_image,p),q);
-                p+=GetPixelChannels(canvas_image);
-                q+=GetPixelChannels(image);
+                p+=(ptrdiff_t) GetPixelChannels(canvas_image);
+                q+=(ptrdiff_t) GetPixelChannels(image);
               }
               if (SyncAuthenticPixels(image,exception) == MagickFalse)
                 break;
@@ -611,11 +613,11 @@ static Image *ReadBGRImage(const ImageInfo *image_info,ExceptionInfo *exception)
                   if ((p == (const Quantum *) NULL) ||
                       (q == (Quantum *) NULL))
                     break;
-                  for (x=0; x < (ssize_t) image->columns; x++)
+                  for (x=0; x < columns; x++)
                   {
                     SetPixelAlpha(image,GetPixelAlpha(canvas_image,p),q);
-                    p+=GetPixelChannels(canvas_image);
-                    q+=GetPixelChannels(image);
+                    p+=(ptrdiff_t) GetPixelChannels(canvas_image);
+                    q+=(ptrdiff_t) GetPixelChannels(image);
                   }
                   if (SyncAuthenticPixels(image,exception) == MagickFalse)
                     break;
@@ -702,11 +704,11 @@ static Image *ReadBGRImage(const ImageInfo *image_info,ExceptionInfo *exception)
               if ((p == (const Quantum *) NULL) ||
                   (q == (Quantum *) NULL))
                 break;
-              for (x=0; x < (ssize_t) image->columns; x++)
+              for (x=0; x < columns; x++)
               {
                 SetPixelRed(image,GetPixelRed(canvas_image,p),q);
-                p+=GetPixelChannels(canvas_image);
-                q+=GetPixelChannels(image);
+                p+=(ptrdiff_t) GetPixelChannels(canvas_image);
+                q+=(ptrdiff_t) GetPixelChannels(image);
               }
               if (SyncAuthenticPixels(image,exception) == MagickFalse)
                 break;
@@ -774,11 +776,11 @@ static Image *ReadBGRImage(const ImageInfo *image_info,ExceptionInfo *exception)
               if ((p == (const Quantum *) NULL) ||
                   (q == (Quantum *) NULL))
                 break;
-              for (x=0; x < (ssize_t) image->columns; x++)
+              for (x=0; x < columns; x++)
               {
                 SetPixelGreen(image,GetPixelGreen(canvas_image,p),q);
-                p+=GetPixelChannels(canvas_image);
-                q+=GetPixelChannels(image);
+                p+=(ptrdiff_t) GetPixelChannels(canvas_image);
+                q+=(ptrdiff_t) GetPixelChannels(image);
               }
               if (SyncAuthenticPixels(image,exception) == MagickFalse)
                 break;
@@ -846,11 +848,11 @@ static Image *ReadBGRImage(const ImageInfo *image_info,ExceptionInfo *exception)
               if ((p == (const Quantum *) NULL) ||
                   (q == (Quantum *) NULL))
                 break;
-              for (x=0; x < (ssize_t) image->columns; x++)
+              for (x=0; x < columns; x++)
               {
                 SetPixelBlue(image,GetPixelBlue(canvas_image,p),q);
-                p+=GetPixelChannels(canvas_image);
-                q+=GetPixelChannels(image);
+                p+=(ptrdiff_t) GetPixelChannels(canvas_image);
+                q+=(ptrdiff_t) GetPixelChannels(image);
               }
               if (SyncAuthenticPixels(image,exception) == MagickFalse)
                 break;
@@ -920,11 +922,11 @@ static Image *ReadBGRImage(const ImageInfo *image_info,ExceptionInfo *exception)
                   if ((p == (const Quantum *) NULL) ||
                       (q == (Quantum *) NULL))
                     break;
-                  for (x=0; x < (ssize_t) image->columns; x++)
+                  for (x=0; x < columns; x++)
                   {
                     SetPixelAlpha(image,GetPixelAlpha(canvas_image,p),q);
-                    p+=GetPixelChannels(canvas_image);
-                    q+=GetPixelChannels(image);
+                    p+=(ptrdiff_t) GetPixelChannels(canvas_image);
+                    q+=(ptrdiff_t) GetPixelChannels(image);
                   }
                   if (SyncAuthenticPixels(image,exception) == MagickFalse)
                     break;
@@ -1342,7 +1344,10 @@ static MagickBooleanType WriteBGRImage(const ImageInfo *image_info,Image *image,
         status=OpenBlob(image_info,image,scene == 0 ? WriteBinaryBlobMode :
           AppendBinaryBlobMode,exception);
         if (status == MagickFalse)
-          return(status);
+          {
+            quantum_info=DestroyQuantumInfo(quantum_info);
+            return(status);
+          }
         for (y=0; y < (ssize_t) image->rows; y++)
         {
           const Quantum
@@ -1369,7 +1374,10 @@ static MagickBooleanType WriteBGRImage(const ImageInfo *image_info,Image *image,
         status=OpenBlob(image_info,image,scene == 0 ? WriteBinaryBlobMode :
           AppendBinaryBlobMode,exception);
         if (status == MagickFalse)
-          return(status);
+          {
+            quantum_info=DestroyQuantumInfo(quantum_info);
+            return(status);
+          }
         for (y=0; y < (ssize_t) image->rows; y++)
         {
           const Quantum
@@ -1396,7 +1404,10 @@ static MagickBooleanType WriteBGRImage(const ImageInfo *image_info,Image *image,
         status=OpenBlob(image_info,image,scene == 0 ? WriteBinaryBlobMode :
           AppendBinaryBlobMode,exception);
         if (status == MagickFalse)
-          return(status);
+          {
+            quantum_info=DestroyQuantumInfo(quantum_info);
+            return(status);
+          }
         for (y=0; y < (ssize_t) image->rows; y++)
         {
           const Quantum
@@ -1426,7 +1437,10 @@ static MagickBooleanType WriteBGRImage(const ImageInfo *image_info,Image *image,
             status=OpenBlob(image_info,image,scene == 0 ? WriteBinaryBlobMode :
               AppendBinaryBlobMode,exception);
             if (status == MagickFalse)
-              return(status);
+              {
+                quantum_info=DestroyQuantumInfo(quantum_info);
+                return(status);
+              }
             for (y=0; y < (ssize_t) image->rows; y++)
             {
               const Quantum

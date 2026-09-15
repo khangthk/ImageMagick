@@ -5,7 +5,7 @@
   You may not use this file except in compliance with the License.  You may
   obtain a copy of the License at
 
-    https://imagemagick.org/script/license.php
+    https://imagemagick.org/license/
 
   Unless required by applicable law or agreed to in writing, software
   distributed under the License is distributed on an "AS IS" BASIS,
@@ -118,23 +118,7 @@ static inline char *SubstituteXMLEntities(const char *content,
 }
 
 extern MagickPrivate char
-  *CanonicalXMLContent(const char *,const MagickBooleanType),
   *FileToXML(const char *,const size_t);
-
-extern MagickPrivate const char
-  **GetXMLTreeProcessingInstructions(XMLTreeInfo *,const char *);
-
-extern MagickPrivate MagickBooleanType
-  GetXMLTreeAttributes(const XMLTreeInfo *,SplayTreeInfo *);
-
-extern MagickPrivate XMLTreeInfo
-  *AddPathToXMLTree(XMLTreeInfo *,const char *,const size_t),
-  *GetXMLTreeOrdered(XMLTreeInfo *),
-  *GetXMLTreePath(XMLTreeInfo *,const char *),
-  *InsertTagIntoXMLTree(XMLTreeInfo *,XMLTreeInfo *,const size_t),
-  *ParseTagFromXMLTree(XMLTreeInfo *),
-  *PruneTagFromXMLTree(XMLTreeInfo *),
-  *SetXMLTreeAttribute(XMLTreeInfo *,const char *,const char *);
 
 #if defined(__cplusplus) || defined(c_plusplus)
 }

@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -218,8 +218,10 @@ WandExport MagickBooleanType ImportImageCommand(ImageInfo *image_info,
 }
 #define ThrowImportException(asperity,tag,option) \
 { \
-  (void) ThrowMagickException(exception,GetMagickModule(),asperity,tag,"`%s'", \
-     option); \
+  char *message = GetExceptionMessage(errno);     \
+  (void) ThrowMagickException(exception,GetMagickModule(),asperity,tag, \
+    "`%s'",option == (char *) NULL ? message : option); \
+  message=DestroyString(message); \
   DestroyImport(); \
   return(MagickFalse); \
 }
@@ -314,7 +316,7 @@ WandExport MagickBooleanType ImportImageCommand(ImageInfo *image_info,
   status=ExpandFilenames(&argc,&argv);
   if (status == MagickFalse)
     ThrowImportException(ResourceLimitError,"MemoryAllocationFailed",
-      GetExceptionMessage(errno));
+      (char *) NULL);
   for (i=1; i < (ssize_t) argc; i++)
   {
     /*

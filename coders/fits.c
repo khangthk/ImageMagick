@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -186,9 +186,9 @@ static MagickOffsetType GetFITSPixelExtrema(Image *image,
   offset=TellBlob(image);
   if (offset == -1)
     return(-1);
-  number_pixels=(MagickSizeType) image->columns*image->rows;
-  *minima=DBL_MAX;
-  *maxima=DBL_MIN;
+  number_pixels=((MagickSizeType) image->columns*image->rows);
+  *minima=MagickMaximumValue;
+  *maxima=(-MagickMaximumValue);
   for (i=0; i < (MagickOffsetType) number_pixels; i++)
   {
     pixel=GetFITSPixel(image,bits_per_pixel);
@@ -226,7 +226,6 @@ static Image *ReadFITSImage(const ImageInfo *image_info,
   typedef struct _FITSInfo
   {
     MagickBooleanType
-      extend,
       simple;
 
     int
@@ -302,24 +301,23 @@ static Image *ReadFITSImage(const ImageInfo *image_info,
       image=DestroyImageList(image);
       return((Image *) NULL);
     }
+  /*
+    Initialize image header.
+  */
+  (void) memset(&fits_info,0,sizeof(fits_info));
+  fits_info.simple=MagickFalse;
+  fits_info.bits_per_pixel=8;
+  fits_info.columns=1;
+  fits_info.rows=1;
+  fits_info.number_axes=0;
+  fits_info.number_planes=1;
+  fits_info.min_data=0.0;
+  fits_info.max_data=0.0;
+  fits_info.zero=0.0;
+  fits_info.scale=1.0;
+  fits_info.endian=MSBEndian;
   do
   {
-    /*
-      Initialize image header.
-    */
-    (void) memset(&fits_info,0,sizeof(fits_info));
-    fits_info.extend=MagickFalse;
-    fits_info.simple=MagickFalse;
-    fits_info.bits_per_pixel=8;
-    fits_info.columns=1;
-    fits_info.rows=1;
-    fits_info.number_axes=1;
-    fits_info.number_planes=1;
-    fits_info.min_data=0.0;
-    fits_info.max_data=0.0;
-    fits_info.zero=0.0;
-    fits_info.scale=1.0;
-    fits_info.endian=MSBEndian;
     /*
       Decode image header.
     */
@@ -337,7 +335,7 @@ static Image *ReadFITSImage(const ImageInfo *image_info,
         {
           if (isspace((int) ((unsigned char) keyword[i])) != 0)
             break;
-          keyword[i]=LocaleToLowercase((int) ((unsigned char) keyword[i]));
+          keyword[i]=(char) LocaleToLowercase((int) ((unsigned char) keyword[i]));
         }
         keyword[i]='\0';
         count=ReadBlob(image,72,(unsigned char *) value);
@@ -347,15 +345,12 @@ static Image *ReadFITSImage(const ImageInfo *image_info,
         p=value;
         if (*p == '=')
           {
-            p+=2;
+            p+=(ptrdiff_t) 2;
             while (isspace((int) ((unsigned char) *p)) != 0)
               p++;
           }
         if (LocaleCompare(keyword,"end") == 0)
           break;
-        if (LocaleCompare(keyword,"extend") == 0)
-          fits_info.extend=(*p == 'T') || (*p == 't') ? MagickTrue :
-            MagickFalse;
         if (LocaleCompare(keyword,"simple") == 0)
           fits_info.simple=(*p == 'T') || (*p == 't') ? MagickTrue :
             MagickFalse;
@@ -397,8 +392,6 @@ static Image *ReadFITSImage(const ImageInfo *image_info,
       c=0;
       while (((TellBlob(image) % FITSBlocksize) != 0) && (c != EOF))
         c=ReadBlobByte(image);
-      if (fits_info.extend == MagickFalse)
-        break;
       if ((fits_info.bits_per_pixel != 8) &&
           (fits_info.bits_per_pixel != 16) &&
           (fits_info.bits_per_pixel != 32) &&
@@ -411,13 +404,13 @@ static Image *ReadFITSImage(const ImageInfo *image_info,
           ThrowReaderException(CorruptImageError,"ImproperImageHeader");
         }
       if ((fits_info.columns <= 0) || (fits_info.rows <= 0) ||
-          (fits_info.number_axes <= 0) || (fits_info.number_planes <= 0))
+          (fits_info.number_axes < 0) || (fits_info.number_planes <= 0))
         {
           if (comment != (char *) NULL)
             comment=DestroyString(comment);
           ThrowReaderException(CorruptImageError,"ImproperImageHeader");
         }
-      number_pixels=(MagickSizeType) (fits_info.columns*fits_info.rows);
+      number_pixels=((MagickSizeType) fits_info.columns*fits_info.rows);
       if ((fits_info.simple != MagickFalse) && (fits_info.number_axes >= 1) &&
           (fits_info.number_axes <= 4) && (number_pixels != 0))
         break;
@@ -433,11 +426,19 @@ static Image *ReadFITSImage(const ImageInfo *image_info,
     if (EOFBlob(image) != MagickFalse)
       ThrowFileException(exception,CorruptImageError,"UnexpectedEndOfFile",
         image->filename);
-    number_pixels=(MagickSizeType) (fits_info.columns*fits_info.rows);
+    number_pixels=((MagickSizeType) fits_info.columns*fits_info.rows);
     if ((fits_info.simple == MagickFalse) || (fits_info.number_axes < 1) ||
         (fits_info.number_axes > 4) || (number_pixels == 0) ||
         (fits_info.number_planes <= 0))
-      ThrowReaderException(CorruptImageError,"ImageTypeNotSupported");
+      {
+        number_pixels=number_pixels*
+          MagickAbsoluteValue(fits_info.bits_per_pixel)/8;
+        number_pixels=((number_pixels+FITSBlocksize-1)/FITSBlocksize)*
+          FITSBlocksize;
+        (void) SeekBlob(image,(MagickOffsetType) number_pixels,SEEK_CUR);
+      }
+    if (AcquireMagickResource(ListLengthResource,fits_info.number_planes) == MagickFalse)
+      ThrowReaderException(ResourceLimitError,"ListLengthExceedsLimit");
     for (scene=0; scene < (ssize_t) fits_info.number_planes; scene++)
     {
       image->columns=(size_t) fits_info.columns;
@@ -471,7 +472,7 @@ static Image *ReadFITSImage(const ImageInfo *image_info,
       /*
         Convert FITS pixels to pixel packets.
       */
-      scale=(double) QuantumRange*PerceptibleReciprocal(fits_info.max_data-
+      scale=(double) QuantumRange*MagickSafeReciprocal(fits_info.max_data-
         fits_info.min_data);
       for (y=(ssize_t) image->rows-1; y >= 0; y--)
       {
@@ -487,7 +488,7 @@ static Image *ReadFITSImage(const ImageInfo *image_info,
               (unsigned char *) &pixel);
           SetPixelGray(image,ClampToQuantum(scale*(fits_info.scale*(pixel-
             fits_info.min_data)+fits_info.zero)),q);
-          q+=GetPixelChannels(image);
+          q+=(ptrdiff_t) GetPixelChannels(image);
         }
         if (SyncAuthenticPixels(image,exception) == MagickFalse)
           break;
@@ -498,6 +499,8 @@ static Image *ReadFITSImage(const ImageInfo *image_info,
             if (status == MagickFalse)
               break;
           }
+        if (EOFBlob(image) != MagickFalse)
+          break;
       }
       if (EOFBlob(image) != MagickFalse)
         {
@@ -792,7 +795,7 @@ static MagickBooleanType WriteFITSImage(const ImageInfo *image_info,
     (void) FormatLocaleString(header,FITSBlocksize,"HISTORY %.72s",
       MagickAuthoritativeURL);
     offset+=CopyFITSRecord(fits_info,header,offset);
-    (void) strncpy(header,"END",FITSBlocksize);
+    (void) CopyMagickString(header,"END",FITSBlocksize);
     offset+=CopyFITSRecord(fits_info,header,offset);
     (void) WriteBlob(image,FITSBlocksize,(unsigned char *) fits_info);
     /*

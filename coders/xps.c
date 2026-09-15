@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -228,9 +228,9 @@ static Image *ReadXPSImage(const ImageInfo *image_info,ExceptionInfo *exception)
   if (image_info->page != (char *) NULL)
     (void) ParseAbsoluteGeometry(image_info->page,&page);
   resolution=image->resolution;
-  page.width=(size_t) ((ssize_t) ceil((double) (page.width*resolution.x/
+  page.width=CastDoubleToSizeT(((double) (page.width*resolution.x/
     delta.x)-0.5));
-  page.height=(size_t) ((ssize_t) ceil((double) (page.height*resolution.y/
+  page.height=CastDoubleToSizeT(((double) (page.height*resolution.y/
     delta.y)-0.5));
   fitPage=MagickFalse;
   option=GetImageOption(image_info,"xps:fit-page");
@@ -250,9 +250,9 @@ static Image *ReadXPSImage(const ImageInfo *image_info,ExceptionInfo *exception)
           image=DestroyImage(image);
           return((Image *) NULL);
         }
-      page.width=(size_t) ((ssize_t) ceil((double) (page.width*
+      page.width=CastDoubleToSizeT(((double) (page.width*
         image->resolution.x/delta.x)-0.5));
-      page.height=(size_t) ((ssize_t) ceil((double) (page.height*
+      page.height=CastDoubleToSizeT(((double) (page.height*
         image->resolution.y/delta.y) -0.5));
       page_geometry=DestroyString(page_geometry);
       fitPage=MagickTrue;
@@ -273,7 +273,7 @@ static Image *ReadXPSImage(const ImageInfo *image_info,ExceptionInfo *exception)
   if (image_info->ping != MagickFalse)
     (void) FormatLocaleString(density,MagickPathExtent,"2.0x2.0");
   else
-    (void) FormatLocaleString(options,MagickPathExtent,"-g%.20gx%.20g ",
+    (void) FormatLocaleString(options,MagickPathExtent,"-g%.17gx%.17g ",
       (double) page.width,(double) page.height);
   read_info=CloneImageInfo(image_info);
   *read_info->magick='\0';
@@ -282,8 +282,8 @@ static Image *ReadXPSImage(const ImageInfo *image_info,ExceptionInfo *exception)
       char
         pages[MagickPathExtent];
 
-      (void) FormatLocaleString(pages,MagickPathExtent,"-dFirstPage=%.20g "
-        "-dLastPage=%.20g ",(double) read_info->scene+1,(double)
+      (void) FormatLocaleString(pages,MagickPathExtent,"-dFirstPage=%.17g "
+        "-dLastPage=%.17g ",(double) read_info->scene+1,(double)
         (read_info->scene+read_info->number_scenes));
       (void) ConcatenateMagickString(options,pages,MagickPathExtent);
       read_info->number_scenes=0;

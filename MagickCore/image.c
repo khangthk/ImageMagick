@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -86,6 +86,7 @@
 #include "MagickCore/property.h"
 #include "MagickCore/quantize.h"
 #include "MagickCore/random_.h"
+#include "MagickCore/registry.h"
 #include "MagickCore/resource_.h"
 #include "MagickCore/segment.h"
 #include "MagickCore/semaphore.h"
@@ -140,7 +141,7 @@ MagickExport Image *AcquireImage(const ImageInfo *image_info,
   Image
     *image;
 
-  int
+  MagickSizeType
     time_limit;
 
   MagickStatusType
@@ -186,10 +187,14 @@ MagickExport Image *AcquireImage(const ImageInfo *image_info,
   image->channel_mask=AllChannels;
   image->channel_map=AcquirePixelChannelMap();
   image->blob=CloneBlobInfo((BlobInfo *) NULL);
-  image->timestamp=GetMagickTime();
-  time_limit=(int) GetMagickResourceLimit(TimeResource);
-  if (time_limit > 0)
-    image->ttl=image->timestamp+time_limit;
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+  image->timestamp=0;  /* Deterministic for fuzzing */
+#else
+  image->timestamp=time((time_t *) NULL);
+#endif
+  time_limit=GetMagickResourceLimit(TimeResource);
+  if (time_limit != MagickResourceInfinity)
+    image->ttl=image->timestamp+(time_t) time_limit;
   image->debug=(GetLogEventMask() & (ImageEvent | TransformEvent | CoderEvent))
     != 0 ? MagickTrue : MagickFalse;
   image->reference_count=1;
@@ -286,21 +291,22 @@ MagickExport Image *AcquireImage(const ImageInfo *image_info,
       if ((flags & GreaterValue) != 0)
         {
           if ((double) image->delay > floor(geometry_info.rho+0.5))
-            image->delay=(size_t) CastDoubleToLong(floor(
-              geometry_info.rho+0.5));
+            image->delay=(size_t) CastDoubleToSsizeT(floor(geometry_info.rho+
+              0.5));
         }
       else
         if ((flags & LessValue) != 0)
           {
             if ((double) image->delay < floor(geometry_info.rho+0.5))
-              image->ticks_per_second=CastDoubleToLong(floor(
+              image->ticks_per_second=CastDoubleToSsizeT(floor(
                 geometry_info.sigma+0.5));
           }
         else
-          image->delay=(size_t) CastDoubleToLong(floor(geometry_info.rho+0.5));
+          image->delay=(size_t) CastDoubleToSsizeT(floor(geometry_info.rho+
+            0.5));
       if ((flags & SigmaValue) != 0)
-        image->ticks_per_second=CastDoubleToLong(floor(
-          geometry_info.sigma+0.5));
+        image->ticks_per_second=CastDoubleToSsizeT(floor(geometry_info.sigma+
+          0.5));
     }
   option=GetImageOption(image_info,"dispose");
   if (option != (const char *) NULL)
@@ -581,8 +587,8 @@ MagickExport Image *AppendImages(const Image *images,
       {
         GetPixelInfoPixel(next,p,&pixel);
         SetPixelViaPixelInfo(append_image,&pixel,q);
-        p+=GetPixelChannels(next);
-        q+=GetPixelChannels(append_image);
+        p+=(ptrdiff_t) GetPixelChannels(next);
+        q+=(ptrdiff_t) GetPixelChannels(append_image);
       }
       sync=SyncCacheViewAuthenticPixels(append_view,exception);
       if (sync == MagickFalse)
@@ -697,7 +703,8 @@ MagickExport MagickBooleanType ClipImagePath(Image *image,const char *pathname,
 #define ClipImagePathTag  "ClipPath/Image"
 
   char
-    *property;
+    *property,
+    *sanitized_pathname;
 
   const char
     *value;
@@ -727,8 +734,11 @@ MagickExport MagickBooleanType ClipImagePath(Image *image,const char *pathname,
   image_info=AcquireImageInfo();
   (void) CopyMagickString(image_info->filename,image->filename,
      MagickPathExtent);
-  (void) ConcatenateMagickString(image_info->filename,pathname,
+  (void) ConcatenateMagickString(image_info->filename,"_",MagickPathExtent);
+  sanitized_pathname=SanitizeString(pathname);
+  (void) ConcatenateMagickString(image_info->filename,sanitized_pathname,
     MagickPathExtent);
+  sanitized_pathname=DestroyString(sanitized_pathname);
   clip_mask=BlobToImage(image_info,value,strlen(value),exception);
   image_info=DestroyImageInfo(image_info);
   if (clip_mask == (Image *) NULL)
@@ -744,7 +754,6 @@ MagickExport MagickBooleanType ClipImagePath(Image *image,const char *pathname,
   (void) FormatLocaleString(clip_mask->magick_filename,MagickPathExtent,
     "8BIM:1999,2998:%s\nPS",pathname);
   (void) SetImageMask(image,WritePixelMask,clip_mask,exception);
-  image->mask_trait=UpdatePixelTrait;
   clip_mask=DestroyImage(clip_mask);
   return(MagickTrue);
 }
@@ -899,17 +908,17 @@ MagickExport Image *CloneImage(const Image *image,const size_t columns,
     scale_x=(double) columns/(double) image->columns;
   if (image->rows != 0)
     scale_y=(double) rows/(double) image->rows;
-  clone_image->page.width=(size_t) CastDoubleToLong(floor(scale_x*
+  clone_image->page.width=(size_t) CastDoubleToSsizeT(floor(scale_x*
     image->page.width+0.5));
-  clone_image->page.height=(size_t) CastDoubleToLong(floor(scale_y*
+  clone_image->page.height=(size_t) CastDoubleToSsizeT(floor(scale_y*
     image->page.height+0.5));
   if (MagickAbsoluteValue(scale_x-scale_y) < 2.0)
     scale_x=scale_y=MagickMin(scale_x,scale_y);
-  clone_image->page.x=CastDoubleToLong(ceil(scale_x*image->page.x-0.5));
-  clone_image->tile_offset.x=CastDoubleToLong(ceil(scale_x*
+  clone_image->page.x=CastDoubleToSsizeT(ceil(scale_x*image->page.x-0.5));
+  clone_image->tile_offset.x=CastDoubleToSsizeT(ceil(scale_x*
     image->tile_offset.x-0.5));
-  clone_image->page.y=CastDoubleToLong(ceil(scale_y*image->page.y-0.5));
-  clone_image->tile_offset.y=CastDoubleToLong(ceil(scale_y*
+  clone_image->page.y=CastDoubleToSsizeT(ceil(scale_y*image->page.y-0.5));
+  clone_image->tile_offset.y=CastDoubleToSsizeT(ceil(scale_y*
     image->tile_offset.y-0.5));
   clone_image->cache=ClonePixelCache(image->cache);
   if (SetImageExtent(clone_image,columns,rows,exception) == MagickFalse)
@@ -1035,7 +1044,7 @@ MagickExport ImageInfo *CloneImageInfo(const ImageInfo *image_info)
 %
 %      MagickBooleanType CopyImagePixels(Image *image,const Image *source_image,
 %        const RectangleInfo *geometry,const OffsetInfo *offset,
-%        ExceptionInfo *exception);
+%        ExceptionInfo *exception)
 %
 %  A description of each parameter follows:
 %
@@ -1134,8 +1143,8 @@ MagickExport MagickBooleanType CopyImagePixels(Image *image,
           continue;
         SetPixelChannel(image,channel,p[i],q);
       }
-      p+=GetPixelChannels(source_image);
-      q+=GetPixelChannels(image);
+      p+=(ptrdiff_t) GetPixelChannels(source_image);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
     sync=SyncCacheViewAuthenticPixels(image_view,exception);
     if (sync == MagickFalse)
@@ -1530,8 +1539,8 @@ MagickExport Image *GetImageMask(const Image *image,const PixelMask type,
           break;
         }
       }
-      p+=GetPixelChannels(image);
-      q+=GetPixelChannels(mask_image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(mask_image);
     }
     if (SyncCacheViewAuthenticPixels(mask_view,exception) == MagickFalse)
       status=MagickFalse;
@@ -1634,7 +1643,7 @@ MagickExport VirtualPixelMethod GetImageVirtualPixelMethod(const Image *image)
 %
 %  A description of each parameter follows.
 %
-%    o image_info: the image info..
+%    o image_info: the image info.
 %
 %    o image: the image.
 %
@@ -1648,133 +1657,176 @@ MagickExport VirtualPixelMethod GetImageVirtualPixelMethod(const Image *image)
 %    o exception: return any errors or warnings in this structure.
 %
 */
+
+static inline MagickBooleanType IsValidFormatSpecifier(const char *start,
+  const char *end)
+{
+  char
+    specifier = end[-1];
+
+  size_t
+    length = (size_t) (end-start);
+
+  /*
+    Is this a valid format specifier?
+  */
+  if ((specifier != 'd') && (specifier != 'x') && (specifier != 'o'))
+    return(MagickFalse);
+  if ((length == 1) && (*start == specifier))
+    return(MagickTrue);
+  if (length >= 2)
+    {
+      size_t
+        i = 0;
+
+      if (*start == '0')
+        {
+          if ((length >= 3) && (start[1] == '0'))
+            return(MagickFalse);
+          i=1;
+        }
+      for ( ; i < (length-1); i++)
+        if (isdigit((int) ((unsigned char) start[i])) == 0)
+          return(MagickFalse);
+      return(MagickTrue);
+    }
+  return(MagickFalse);
+}
+
 MagickExport size_t InterpretImageFilename(const ImageInfo *image_info,
   Image *image,const char *format,int value,char *filename,
   ExceptionInfo *exception)
 {
   char
-    *q;
+    *literal,
+    *p = filename,
+    pattern[MagickPathExtent];
 
   const char
-    *p;
+    *cursor = format;
 
-  int
-    c;
-
-  MagickBooleanType
-    canonical;
-
-  ssize_t
-    field_width,
-    offset;
-
-  canonical=MagickFalse;
-  offset=0;
-  (void) CopyMagickString(filename,format,MagickPathExtent);
-  if (IsStringTrue(GetImageOption(image_info,"filename:literal")) != MagickFalse)
-    return(strlen(filename));
-  for (p=strchr(format,'%'); p != (char *) NULL; p=strchr(p+1,'%'))
+  assert(format != (const char *) NULL);
+  assert(filename != (char *) NULL);
+  literal=(char *) GetImageRegistry(StringRegistryType,"filename:literal",
+    exception);
+  if (IsStringTrue(literal) != MagickFalse)
+    {
+      if (literal != (char *) NULL)
+        literal=DestroyString(literal);
+      (void) CopyMagickString(filename,format,MagickPathExtent);
+      return(strlen(filename));
+    }
+  if (literal != (char *) NULL)
+    literal=DestroyString(literal);
+  while ((*cursor != '\0') && ((p-filename) < ((ssize_t) MagickPathExtent-1)))
   {
-    q=(char *) p+1;
-    if (*q == '%')
+    const char
+      *specifier_start,
+      *start;
+
+    if (*cursor != '%')
       {
-        p=q+1;
+        *p++=(*cursor++);
         continue;
       }
-    field_width=0;
-    if (*q == '0')
-      field_width=(ssize_t) strtol(q,&q,10);
-    switch (*q)
-    {
-      case 'd':
-      case 'o':
-      case 'x':
+    start=cursor++;  /* Skip '%' */
+    if (*cursor == '%')
       {
-        q++;
-        c=(*q);
-        *q='\0';
-        (void) FormatLocaleString(filename+(p-format-offset),(size_t)
-          (MagickPathExtent-(p-format-offset)),p,value);
-        offset+=(4-field_width);
-        *q=c;
-        (void) ConcatenateMagickString(filename,q,MagickPathExtent);
-        canonical=MagickTrue;
-        if (*(q-1) != '%')
-          break;
-        p++;
-        break;
+        *p++='%';
+        cursor++;
+        continue;
       }
-      case '[':
+    specifier_start=cursor;
+    while (isdigit((int) ((unsigned char) *cursor)) != 0)
+      cursor++;
+    if ((*cursor == 'd') || (*cursor == 'o') || (*cursor == 'x'))
       {
-        char
-          pattern[MagickPathExtent];
-
         const char
-          *option;
+          *specifier_end = cursor+1;
 
-        char
-          *r;
+        if (IsValidFormatSpecifier(specifier_start,specifier_end) != MagickFalse)
+          {
+            char
+              format_specifier[MagickPathExtent];
 
-        ssize_t
-          i;
+            size_t
+              length = (size_t) (cursor-specifier_start),
+              pattern_length;
 
-        ssize_t
-          depth;
+            ssize_t
+              count;
 
-        /*
-          Image option.
-        */
-        if (strchr(p,']') == (char *) NULL)
-          break;
-        depth=1;
-        r=q+1;
-        for (i=0; (i < (MagickPathExtent-1L)) && (*r != '\0'); i++)
-        {
-          if (*r == '[')
-            depth++;
-          if (*r == ']')
-            depth--;
-          if (depth <= 0)
-            break;
-          pattern[i]=(*r++);
-        }
-        pattern[i]='\0';
-        if (LocaleNCompare(pattern,"filename:",9) != 0)
-          break;
-        option=(const char *) NULL;
-        if (image != (Image *) NULL)
-          option=GetImageProperty(image,pattern,exception);
-        if ((option == (const char *) NULL) && (image != (Image *) NULL))
-          option=GetImageArtifact(image,pattern);
+            (void) snprintf(format_specifier,sizeof(format_specifier),
+              "%%%.*s%c",(int) length,specifier_start,*cursor);
+            count=FormatLocaleString(pattern,sizeof(pattern),format_specifier,
+              value);
+            pattern_length=strlen(pattern);
+            if ((count <= 0) || ((size_t) count != pattern_length))
+              return(0);
+            if ((p-filename+pattern_length) >= MagickPathExtent)
+              return(0);
+            (void) CopyMagickString(p,pattern,(size_t) (MagickPathExtent-
+              (p-filename)));
+            p+=pattern_length;
+            cursor++;
+            continue;
+          }
+        else
+          {
+            /*
+              Invalid specifier — treat as literal.
+            */
+            cursor=start;
+            *p++=(*cursor++);
+            continue;
+          }
+      }
+    if (*cursor == '[')
+      {
+        const char
+          *end = strchr(cursor,']'),
+          *option = (const char *) NULL;
+
+        size_t
+          extent,
+          option_length;
+
+        if (end == (const char *) NULL)
+          continue;
+        extent=(size_t) (end-cursor-1);
+        if (extent >= sizeof(pattern))
+          continue;
+        (void) CopyMagickString(pattern,cursor+1,extent+1);
+        pattern[extent]='\0';
+        if (image != NULL)
+          {
+            option=GetImageProperty(image,pattern,exception);
+            if (option == (const char *) NULL)
+              option=GetImageArtifact(image,pattern);
+          }
         if ((option == (const char *) NULL) &&
             (image_info != (ImageInfo *) NULL))
           option=GetImageOption(image_info,pattern);
         if (option == (const char *) NULL)
-          break;
-        q--;
-        c=(*q);
-        *q='\0';
-        (void) CopyMagickString(filename+(p-format-offset),option,(size_t)
-          (MagickPathExtent-(p-format-offset)));
-        offset+=(ssize_t) strlen(pattern)-(ssize_t) strlen(option)+3;
-        *q=c;
-        (void) ConcatenateMagickString(filename,r+1,MagickPathExtent);
-        canonical=MagickTrue;
-        if (*(q-1) != '%')
-          break;
-        p++;
-        break;
+          continue;
+        option_length=strlen(option);
+        if ((p-filename+option_length) >= MagickPathExtent)
+          return(0);
+        (void) CopyMagickString(p,option,(size_t) (MagickPathExtent-
+          (p-filename)));
+        p+=option_length;
+        cursor=end+1;
+        continue;
       }
-      default:
-        break;
-    }
+    /*
+      Invalid or unsupported specifier — treat as literal.
+    */
+    cursor=start;
+    if ((p-filename+1) >= MagickPathExtent)
+      return(0);
+    *p++=(*cursor++);
   }
-  if (canonical == MagickFalse)
-    (void) CopyMagickString(filename,format,MagickPathExtent);
-  else
-    for (q=filename; *q != '\0'; q++)
-      if ((*q == '%') && (*(q+1) == '%'))
-        (void) CopyMagickString(q,q+1,(size_t) (MagickPathExtent-(q-filename)));
+  *p='\0';
   return(strlen(filename));
 }
 
@@ -1870,7 +1922,7 @@ MagickExport MagickBooleanType IsHighDynamicRangeImage(const Image *image,
       }
       if (hdri != MagickFalse)
         break;
-      p+=GetPixelChannels(image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
     }
   }
   image_view=DestroyCacheView(image_view);
@@ -2098,7 +2150,7 @@ MagickExport Image *NewMagickImage(const ImageInfo *image_info,
     for (x=0; x < (ssize_t) image->columns; x++)
     {
       SetPixelViaPixelInfo(image,background,q);
-      q+=GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncCacheViewAuthenticPixels(image_view,exception) == MagickFalse)
       status=MagickFalse;
@@ -2298,7 +2350,7 @@ MagickExport MagickBooleanType ResetImagePixels(Image *image,
     for (x=0; x < (ssize_t) image->columns; x++)
     {
       (void) memset(q,0,GetPixelChannels(image)*sizeof(Quantum));
-      q+=GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncCacheViewAuthenticPixels(image_view,exception) == MagickFalse)
       status=MagickFalse;
@@ -2344,6 +2396,9 @@ MagickExport MagickBooleanType SetImageAlpha(Image *image,const Quantum alpha,
   MagickBooleanType
     status;
 
+  PixelTrait
+    original_mask;
+
   ssize_t
     y;
 
@@ -2352,6 +2407,9 @@ MagickExport MagickBooleanType SetImageAlpha(Image *image,const Quantum alpha,
   if (IsEventLogging() != MagickFalse)
     (void) LogMagickEvent(TraceEvent,GetMagickModule(),"...");
   image->alpha_trait=BlendPixelTrait;
+  /* Disable mask to make sure that all pixels are changed */
+  original_mask=image->mask_trait;
+  image->mask_trait=UndefinedPixelTrait;
   status=MagickTrue;
   image_view=AcquireAuthenticCacheView(image,exception);
 #if defined(MAGICKCORE_OPENMP_SUPPORT)
@@ -2378,12 +2436,13 @@ MagickExport MagickBooleanType SetImageAlpha(Image *image,const Quantum alpha,
     {
       if (GetPixelWriteMask(image,q) > (QuantumRange/2))
         SetPixelAlpha(image,alpha,q);
-      q+=GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncCacheViewAuthenticPixels(image_view,exception) == MagickFalse)
       status=MagickFalse;
   }
   image_view=DestroyCacheView(image_view);
+  image->mask_trait=original_mask;
   return(status);
 }
 
@@ -2467,7 +2526,7 @@ MagickExport MagickBooleanType SetImageBackgroundColor(Image *image,
     for (x=0; x < (ssize_t) image->columns; x++)
     {
       SetPixelViaPixelInfo(image,&background,q);
-      q+=GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncCacheViewAuthenticPixels(image_view,exception) == MagickFalse)
       status=MagickFalse;
@@ -2581,7 +2640,7 @@ MagickExport MagickBooleanType SetImageColor(Image *image,
     for (x=0; x < (ssize_t) image->columns; x++)
     {
       SetPixelViaPixelInfo(image,color,q);
-      q+=GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncCacheViewAuthenticPixels(image_view,exception) == MagickFalse)
       status=MagickFalse;
@@ -2665,6 +2724,9 @@ MagickExport MagickBooleanType SetImageExtent(Image *image,const size_t columns,
 {
   if ((columns == 0) || (rows == 0))
     ThrowBinaryException(ImageError,"NegativeOrZeroImageSize",image->filename);
+  if ((columns > (size_t) MAGICK_SSIZE_MAX) ||
+      (rows > (size_t) MAGICK_SSIZE_MAX))
+    ThrowBinaryException(ImageError,"ImageSizeLimitExceeded",image->filename);
   image->columns=columns;
   image->rows=rows;
   if (image->depth == 0)
@@ -2795,6 +2857,9 @@ MagickExport MagickBooleanType SetImageInfo(ImageInfo *image_info,
     path[MagickPathExtent],
     *q;
 
+  const char
+    *p;
+
   const MagicInfo
     *magic_info;
 
@@ -2810,9 +2875,6 @@ MagickExport MagickBooleanType SetImageInfo(ImageInfo *image_info,
   MagickBooleanType
     status;
 
-  const char
-    *p;
-
   ssize_t
     count;
 
@@ -2826,6 +2888,12 @@ MagickExport MagickBooleanType SetImageInfo(ImageInfo *image_info,
       image_info->filename);
   *component='\0';
   GetPathComponent(image_info->filename,SubimagePath,component);
+  if (*component == '\0')
+    {   
+      const char *image_frames = GetImageOption(image_info,"image:frames");
+      if (image_frames != (const char *) NULL)
+        (void) CopyMagickString(component,image_frames,MagickPathExtent);
+    }     
   if (*component != '\0')
     {
       /*
@@ -2931,11 +2999,17 @@ MagickExport MagickBooleanType SetImageInfo(ImageInfo *image_info,
            (delegate_info != (const DelegateInfo *) NULL)) &&
           (IsMagickConflict(magic) == MagickFalse))
         {
+          char *literal = (char *) GetImageRegistry(StringRegistryType,
+            "filename:literal",exception);
           image_info->affirm=MagickTrue;
           (void) CopyMagickString(image_info->magick,magic,MagickPathExtent);
           GetPathComponent(image_info->filename,CanonicalPath,component);
+          if (IsStringTrue(literal) != MagickFalse)
+            GetPathComponent(image_info->filename,SubcanonicalPath,component);
           (void) CopyMagickString(image_info->filename,component,
             MagickPathExtent);
+          if (literal != (char *) NULL)
+            literal=DestroyString(literal);
         }
     }
   sans_exception=DestroyExceptionInfo(sans_exception);
@@ -2982,7 +3056,9 @@ MagickExport MagickBooleanType SetImageInfo(ImageInfo *image_info,
       image=AcquireImage(image_info,exception);
       (void) CopyMagickString(image->filename,image_info->filename,
         MagickPathExtent);
-      status=OpenBlob(image_info,image,ReadBinaryBlobMode,exception);
+      sans_exception=AcquireExceptionInfo();
+      status=OpenBlob(image_info,image,ReadBinaryBlobMode,sans_exception);
+      sans_exception=DestroyExceptionInfo(sans_exception);
       if (status == MagickFalse)
         {
           image=DestroyImage(image);
@@ -3227,6 +3303,7 @@ MagickExport MagickBooleanType SetImageMask(Image *image,const PixelMask type,
   if (IsEventLogging() != MagickFalse)
     (void) LogMagickEvent(TraceEvent,GetMagickModule(),"...");
   assert(image->signature == MagickCoreSignature);
+  image->mask_trait=UndefinedPixelTrait;
   if (mask == (const Image *) NULL)
     {
       switch (type)
@@ -3273,7 +3350,6 @@ MagickExport MagickBooleanType SetImageMask(Image *image,const PixelMask type,
   if (SyncImagePixelCache(image,exception) == MagickFalse)
     return(MagickFalse);
   status=MagickTrue;
-  image->mask_trait=UpdatePixelTrait;
   mask_view=AcquireVirtualCacheView(mask,exception);
   image_view=AcquireAuthenticCacheView(image,exception);
 #if defined(MAGICKCORE_OPENMP_SUPPORT)
@@ -3326,15 +3402,15 @@ MagickExport MagickBooleanType SetImageMask(Image *image,const PixelMask type,
           break;
         }
       }
-      p+=GetPixelChannels(mask);
-      q+=GetPixelChannels(image);
+      p+=(ptrdiff_t) GetPixelChannels(mask);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncCacheViewAuthenticPixels(image_view,exception) == MagickFalse)
       status=MagickFalse;
   }
-  image->mask_trait=UndefinedPixelTrait;
   mask_view=DestroyCacheView(mask_view);
   image_view=DestroyCacheView(image_view);
+  image->mask_trait=UpdatePixelTrait;
   return(status);
 }
 
@@ -3387,6 +3463,7 @@ MagickExport MagickBooleanType SetImageRegionMask(Image *image,
   assert(image->signature == MagickCoreSignature);
   if (IsEventLogging() != MagickFalse)
     (void) LogMagickEvent(TraceEvent,GetMagickModule(),"...");
+  image->mask_trait=UndefinedPixelTrait;
   if (region == (const RectangleInfo *) NULL)
     {
       switch (type)
@@ -3433,7 +3510,6 @@ MagickExport MagickBooleanType SetImageRegionMask(Image *image,
   if (SyncImagePixelCache(image,exception) == MagickFalse)
     return(MagickFalse);
   status=MagickTrue;
-  image->mask_trait=UpdatePixelTrait;
   image_view=AcquireAuthenticCacheView(image,exception);
 #if defined(MAGICKCORE_OPENMP_SUPPORT)
   #pragma omp parallel for schedule(static) shared(status) \
@@ -3482,12 +3558,12 @@ MagickExport MagickBooleanType SetImageRegionMask(Image *image,
           break;
         }
       }
-      q+=GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncCacheViewAuthenticPixels(image_view,exception) == MagickFalse)
       status=MagickFalse;
   }
-  image->mask_trait=UndefinedPixelTrait;
+  image->mask_trait=UpdatePixelTrait;
   image_view=DestroyCacheView(image_view);
   return(status);
 }
@@ -3967,7 +4043,7 @@ MagickExport MagickBooleanType SyncImage(Image *image,ExceptionInfo *exception)
     {
       index=PushColormapIndex(image,GetPixelIndex(image,q),&range_exception);
       SetPixelViaPixelInfo(image,image->colormap+(ssize_t) index,q);
-      q+=GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncCacheViewAuthenticPixels(image_view,exception) == MagickFalse)
       status=MagickFalse;

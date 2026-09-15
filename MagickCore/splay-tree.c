@@ -29,7 +29,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -682,10 +682,8 @@ MagickExport MagickBooleanType DeleteNodeFromSplayTree(
 MagickExport SplayTreeInfo *DestroySplayTree(SplayTreeInfo *splay_tree)
 {
   NodeInfo
-    *node;
-
-  NodeInfo
     *active,
+    *node,
     *pend;
 
   LockSemaphoreInfo(splay_tree->semaphore);
@@ -1028,13 +1026,11 @@ static int IterateOverSplayTree(SplayTreeInfo *splay_tree,
     final_transition;
 
   NodeInfo
+    *node,
     **nodes;
 
   ssize_t
     i;
-
-  NodeInfo
-    *node;
 
   TransitionType
     transition;
@@ -1380,10 +1376,8 @@ MagickExport void *RemoveNodeFromSplayTree(SplayTreeInfo *splay_tree,
 MagickExport void ResetSplayTree(SplayTreeInfo *splay_tree)
 {
   NodeInfo
-    *node;
-
-  NodeInfo
     *active,
+    *node,
     *pend;
 
   assert(splay_tree != (SplayTreeInfo *) NULL);
@@ -1519,10 +1513,8 @@ static NodeInfo *Splay(SplayTreeInfo *splay_tree,const size_t depth,
     compare;
 
   NodeInfo
-    **next;
-
-  NodeInfo
     *n,
+    **next,
     *p;
 
   n=(*node);

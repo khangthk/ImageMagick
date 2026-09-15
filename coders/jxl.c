@@ -22,7 +22,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -43,11 +43,13 @@
 #include "MagickCore/blob.h"
 #include "MagickCore/blob-private.h"
 #include "MagickCore/cache.h"
+#include "MagickCore/channel.h"
 #include "MagickCore/colorspace-private.h"
 #include "MagickCore/exception.h"
 #include "MagickCore/exception-private.h"
 #include "MagickCore/image.h"
 #include "MagickCore/image-private.h"
+#include "MagickCore/layer.h"
 #include "MagickCore/list.h"
 #include "MagickCore/magick.h"
 #include "MagickCore/memory_.h"
@@ -186,6 +188,31 @@ static inline StorageType JXLDataTypeToStorageType(Image *image,
       return(CharPixel);
     default:
       return(UndefinedPixel);
+  }
+}
+
+static inline JxlOrientation OrientationToJXLOrientation(
+  const OrientationType orientation)
+{
+  switch (orientation)
+  {
+    default:
+    case TopLeftOrientation:
+      return(JXL_ORIENT_IDENTITY);
+    case TopRightOrientation:
+      return(JXL_ORIENT_FLIP_HORIZONTAL);
+    case BottomRightOrientation:
+      return(JXL_ORIENT_ROTATE_180);
+    case BottomLeftOrientation:
+      return(JXL_ORIENT_FLIP_VERTICAL);
+    case LeftTopOrientation:
+      return(JXL_ORIENT_TRANSPOSE);
+    case RightTopOrientation:
+      return(JXL_ORIENT_ROTATE_90_CW);
+    case RightBottomOrientation:
+      return(JXL_ORIENT_ANTI_TRANSPOSE);
+    case LeftBottomOrientation:
+      return(JXL_ORIENT_ROTATE_90_CCW);
   }
 }
 
@@ -500,6 +527,12 @@ static Image *ReadJXLImage(const ImageInfo *image_info,
           }
         JXLInitImage(image,&basic_info);
         jxl_status=JXL_DEC_BASIC_INFO;
+        status=SetImageExtent(image,image->columns,image->rows,exception);
+        if (status == MagickFalse)
+          {
+            jxl_status=JXL_DEC_ERROR;
+            break;
+          }
         break;
       }
       case JXL_DEC_COLOR_ENCODING:
@@ -603,7 +636,7 @@ static Image *ReadJXLImage(const ImageInfo *image_info,
 #endif
         if (jxl_status != JXL_DEC_SUCCESS)
           break;
-        profile=AcquireProfileStringInfo("icm",profile_size,exception);
+        profile=AcquireProfileStringInfo("icc",profile_size,exception);
         if (profile != (StringInfo *) NULL)
           {
   #if JPEGXL_NUMERIC_VERSION >= JPEGXL_COMPUTE_NUMERIC_VERSION(0,9,0)
@@ -626,6 +659,9 @@ static Image *ReadJXLImage(const ImageInfo *image_info,
       }
       case JXL_DEC_FRAME:
       {
+        JxlFrameHeader
+          frame_header;
+
         if (image_count++ != 0)
           {
             JXLAddProfilesToImage(image,&exif_profile,&xmp_profile,exception);
@@ -637,14 +673,30 @@ static Image *ReadJXLImage(const ImageInfo *image_info,
               break;
             image=SyncNextImageInList(image);
             JXLInitImage(image,&basic_info);
+            status=SetImageExtent(image,image->columns,image->rows,exception);
+            if (status == MagickFalse)
+              {
+                jxl_status=JXL_DEC_ERROR;
+                break;
+              }
           }
+        (void) memset(&frame_header,0,sizeof(frame_header));
+        if (JxlDecoderGetFrameHeader(jxl_info,&frame_header) == JXL_DEC_SUCCESS)
+          image->delay=(size_t) frame_header.duration;
+        if ((basic_info.have_animation == JXL_TRUE) &&
+            (basic_info.alpha_bits != 0))
+          image->dispose=BackgroundDispose;
         break;
       }
       case JXL_DEC_NEED_IMAGE_OUT_BUFFER:
       {
         status=SetImageExtent(image,image->columns,image->rows,exception);
         if (status == MagickFalse)
-          break;
+          {
+            jxl_status=JXL_DEC_ERROR;
+            break;
+          }
+        (void) ResetImagePixels(image,exception);
         JXLSetFormat(image,&pixel_format,exception);
         if (extent == 0)
           {
@@ -729,7 +781,7 @@ static Image *ReadJXLImage(const ImageInfo *image_info,
                 exception);
               if (exif_profile != (StringInfo *) NULL)
                 jxl_status=JxlDecoderSetBoxBuffer(jxl_info,
-                  GetStringInfoDatum(exif_profile),size);
+                  GetStringInfoDatum(exif_profile),(size_t) size);
             }
           }
         if (LocaleNCompare(type,"xml ",sizeof(type)) == 0)
@@ -743,7 +795,7 @@ static Image *ReadJXLImage(const ImageInfo *image_info,
                   exception);
                 if (xmp_profile != (StringInfo *) NULL)
                   jxl_status=JxlDecoderSetBoxBuffer(jxl_info,
-                    GetStringInfoDatum(xmp_profile),size);
+                    GetStringInfoDatum(xmp_profile),(size_t) size);
               }
           }
         if (jxl_status == JXL_DEC_SUCCESS)
@@ -882,8 +934,46 @@ ModuleExport void UnregisterJXLImage(void)
 %
 */
 
+static inline float JXLGetDistance(float quality)
+{
+#if JPEGXL_NUMERIC_VERSION >= JPEGXL_COMPUTE_NUMERIC_VERSION(0,9,0)
+  return(JxlEncoderDistanceFromQuality(quality));
+#else
+  return(quality >= 100.0f ? 0.0f : quality >= 30.0 ? 0.1f+(100.0f-quality)*
+    0.09f : 53.0f/3000.0f*quality*quality-23.0f/20.0f*quality+25.0f);
+#endif
+}
+
+static inline MagickBooleanType JXLParseOption(const char *option,
+  const double minimum,const double maximum,double *value)
+{
+  char
+    *sentinel;
+
+  double
+    number;
+
+  number=StringToDouble(option,&sentinel);
+  if ((sentinel == option) || (number < minimum) || (number > maximum))
+    return(MagickFalse);
+  *value=number;
+  return(MagickTrue);
+}
+
+static inline MagickBooleanType JXLSameFrameType(const Image *image,
+  const Image *frame)
+{
+  if (image->depth != frame->depth)
+    return(MagickFalse);
+  if (image->alpha_trait != frame->alpha_trait)
+    return(MagickFalse);
+  if (image->colorspace != frame->colorspace)
+    return(MagickFalse);
+  return(MagickTrue);
+}
+
 static JxlEncoderStatus JXLWriteMetadata(const Image *image,
-  JxlEncoder *jxl_info)
+  JxlEncoder *jxl_info, const StringInfo *icc_profile)
 {
   JxlColorEncoding
     color_encoding;
@@ -891,6 +981,12 @@ static JxlEncoderStatus JXLWriteMetadata(const Image *image,
   JxlEncoderStatus
     jxl_status;
 
+  if (icc_profile != (StringInfo *) NULL)
+    {
+      jxl_status=JxlEncoderSetICCProfile(jxl_info,(const uint8_t *)
+        GetStringInfoDatum(icc_profile),GetStringInfoLength(icc_profile));
+      return(jxl_status);
+    }
   (void) memset(&color_encoding,0,sizeof(color_encoding));
   color_encoding.color_space=JXL_COLOR_SPACE_RGB;
   if (IsRGBColorspace(image->colorspace) == MagickFalse)
@@ -903,15 +999,6 @@ static JxlEncoderStatus JXLWriteMetadata(const Image *image,
   return(jxl_status);
 }
 
-static inline float JXLGetDistance(const ImageInfo *image_info)
-{
-  if (image_info->quality == 0)
-    return(1.0f);
-  if (image_info->quality >= 30)
-    return(0.1f+(float) (100-MagickMin(100,image_info->quality))*0.09f);
-  return(6.24f+(float) pow(2.5f,(30.0-image_info->quality)/5.0)/6.25f);
-}
-
 static MagickBooleanType WriteJXLImage(const ImageInfo *image_info,Image *image,
   ExceptionInfo *exception)
 {
@@ -919,8 +1006,12 @@ static MagickBooleanType WriteJXLImage(const ImageInfo *image_info,Image *image,
     *option;
 
   const StringInfo
+    *icc_profile = (StringInfo *) NULL,
     *exif_profile = (StringInfo *) NULL,
     *xmp_profile = (StringInfo *) NULL;
+
+  double
+    distance = -1.0;
 
   JxlBasicInfo
     basic_info;
@@ -947,13 +1038,14 @@ static MagickBooleanType WriteJXLImage(const ImageInfo *image_info,Image *image,
     status;
 
   MemoryInfo
-    *pixel_info;
+    *pixel_info = (MemoryInfo *) NULL;
 
   MemoryManagerInfo
     memory_manager_info;
 
   size_t
-    bytes_per_row;
+    channels_size,
+    sample_size;
 
   unsigned char
     *pixels;
@@ -978,6 +1070,39 @@ static MagickBooleanType WriteJXLImage(const ImageInfo *image_info,Image *image,
   if ((IssRGBCompatibleColorspace(image->colorspace) == MagickFalse) &&
       (IsCMYKColorspace(image->colorspace) == MagickFalse))
     (void) TransformImageColorspace(image,sRGBColorspace,exception);
+  if ((image_info->adjoin != MagickFalse) &&
+      (GetNextImageInList(image) != (Image *) NULL))
+    {
+      Image
+        *frame;
+
+      MagickBooleanType
+        has_alpha;
+
+      size_t
+        depth;
+
+      depth=image->depth;
+      has_alpha=MagickFalse;
+      for (frame=image; frame != (Image *) NULL; frame=GetNextImageInList(frame))
+      {
+        if ((frame->alpha_trait & BlendPixelTrait) != 0)
+          has_alpha=MagickTrue;
+        if (frame->depth > depth)
+          depth=frame->depth;
+      }
+      for (frame=image; frame != (Image *) NULL; frame=GetNextImageInList(frame))
+      {
+        frame->depth=depth;
+        if (has_alpha != MagickFalse)
+          {
+            if ((frame->alpha_trait & BlendPixelTrait) == 0)
+              (void) SetImageAlphaChannel(frame,OpaqueAlphaChannel,exception);
+          }
+        if (frame->colorspace != image->colorspace)
+          (void) TransformImageColorspace(frame,image->colorspace,exception);
+      }
+    }
   /*
     Initialize JXL delegate library.
   */
@@ -1004,6 +1129,36 @@ static MagickBooleanType WriteJXLImage(const ImageInfo *image_info,Image *image,
       return(MagickFalse);
     }
   JXLSetFormat(image,&pixel_format,exception);
+  option=GetImageOption(image_info,"jxl:distance");
+  if (option != (const char *) NULL)
+    {
+      if (JXLParseOption(option,0.0,25.0,&distance) == MagickFalse)
+        (void) ThrowMagickException(exception,GetMagickModule(),OptionWarning,
+          "InvalidSetting","`%s'",option);
+    }
+  else
+    {
+      option=GetImageOption(image_info,"jxl:quality");
+      if (option != (const char *) NULL)
+        {
+          double
+            quality;
+
+          if (JXLParseOption(option,0.0,100.0,&quality) == MagickFalse)
+            (void) ThrowMagickException(exception,GetMagickModule(),
+              OptionWarning,"InvalidSetting","`%s'",option);
+          else
+            distance=(double) JXLGetDistance((float) quality);
+        }
+    }
+  if (distance < 0.0)
+    {
+      if (image_info->quality == 100)
+        distance=0.0;
+      else
+        if (image_info->quality != 0)
+          distance=(double) JXLGetDistance((float) image_info->quality);
+    }
   JxlEncoderInitBasicInfo(&basic_info);
   basic_info.xsize=(uint32_t) image->columns;
   basic_info.ysize=(uint32_t) image->rows;
@@ -1030,8 +1185,11 @@ static MagickBooleanType WriteJXLImage(const ImageInfo *image_info,Image *image,
       basic_info.alpha_exponent_bits=basic_info.exponent_bits_per_sample;
       basic_info.num_extra_channels=1;
     }
-  if (image_info->quality == 100)
-    basic_info.uses_original_profile=JXL_TRUE;
+  if (distance == 0.0)
+    {
+      basic_info.uses_original_profile=JXL_TRUE;
+      icc_profile=GetImageProfile(image,"icc");
+    }
   if ((image_info->adjoin != MagickFalse) &&
       (GetNextImageInList(image) != (Image *) NULL))
     {
@@ -1040,8 +1198,8 @@ static MagickBooleanType WriteJXLImage(const ImageInfo *image_info,Image *image,
       basic_info.animation.tps_numerator=(uint32_t) image->ticks_per_second;
       basic_info.animation.tps_denominator=1;
       JxlEncoderInitFrameHeader(&frame_header);
-      frame_header.duration=1;
     }
+  basic_info.orientation=OrientationToJXLOrientation(image->orientation);
   jxl_status=JxlEncoderSetBasicInfo(jxl_info,&basic_info);
   if (jxl_status != JXL_ENC_SUCCESS)
     {
@@ -1057,14 +1215,14 @@ static MagickBooleanType WriteJXLImage(const ImageInfo *image_info,Image *image,
       JxlEncoderDestroy(jxl_info);
       ThrowWriterException(CoderError,"MemoryAllocationFailed");
     }
-  if (image_info->quality == 100)
+  if (distance == 0.0)
     {
-      (void) JxlEncoderSetFrameDistance(frame_settings,0.f);
+      (void) JxlEncoderSetFrameDistance(frame_settings,0.0f);
       (void) JxlEncoderSetFrameLossless(frame_settings,JXL_TRUE);
     }
   else
-    (void) JxlEncoderSetFrameDistance(frame_settings,
-      JXLGetDistance(image_info));
+    if (distance > 0.0)
+      (void) JxlEncoderSetFrameDistance(frame_settings,(float) distance);
   option=GetImageOption(image_info,"jxl:effort");
   if (option != (const char *) NULL)
     (void) JxlEncoderFrameSettingsSetOption(frame_settings,
@@ -1107,7 +1265,7 @@ static MagickBooleanType WriteJXLImage(const ImageInfo *image_info,Image *image,
         }
       (void) JxlEncoderCloseBoxes(jxl_info);
     }
-  jxl_status=JXLWriteMetadata(image,jxl_info);
+  jxl_status=JXLWriteMetadata(image,jxl_info,icc_profile);
   if (jxl_status != JXL_ENC_SUCCESS)
     {
       JxlThreadParallelRunnerDestroy(runner);
@@ -1117,34 +1275,80 @@ static MagickBooleanType WriteJXLImage(const ImageInfo *image_info,Image *image,
   /*
     Write image as a JXL stream.
   */
-  bytes_per_row=image->columns*
-    (((image->alpha_trait & BlendPixelTrait) != 0) ? 4 : 3)*
-    ((pixel_format.data_type == JXL_TYPE_FLOAT) ? sizeof(float) :
-     (pixel_format.data_type == JXL_TYPE_UINT16) ? sizeof(short) :
-     sizeof(char));
+  sample_size=sizeof(char);
+  if ((pixel_format.data_type == JXL_TYPE_FLOAT) ||
+      (pixel_format.data_type == JXL_TYPE_FLOAT16))
+    sample_size=sizeof(float);
+  else
+    if (pixel_format.data_type == JXL_TYPE_UINT16)
+      sample_size=sizeof(short);
   if (IsGrayColorspace(image->colorspace) != MagickFalse)
-    bytes_per_row=image->columns*
-      (((image->alpha_trait & BlendPixelTrait) != 0) ? 2 : 1)*
-      ((pixel_format.data_type == JXL_TYPE_FLOAT) ? sizeof(float) :
-       (pixel_format.data_type == JXL_TYPE_UINT16) ? sizeof(short) :
-       sizeof(char));
-  pixel_info=AcquireVirtualMemory(bytes_per_row,image->rows*sizeof(*pixels));
-  if (pixel_info == (MemoryInfo *) NULL)
-    {
-      JxlThreadParallelRunnerDestroy(runner);
-      JxlEncoderDestroy(jxl_info);
-      ThrowWriterException(CoderError,"MemoryAllocationFailed");
-    }
+    channels_size=(((image->alpha_trait & BlendPixelTrait) != 0) ? 2U : 1U)*
+      sample_size;
+  else
+    channels_size=(((image->alpha_trait & BlendPixelTrait) != 0) ? 4U : 3U)*
+      sample_size;
   do
   {
     Image
       *next;
 
+    size_t
+      bytes_per_row;
+
+    if (HeapOverflowSanityCheckGetSize(image->columns,channels_size,&bytes_per_row) != MagickFalse)
+      {
+        (void) ThrowMagickException(exception,GetMagickModule(),CoderError,
+          "MemoryAllocationFailed","`%s'",image->filename);
+        status=MagickFalse;
+        break;
+      }
+    pixel_info=AcquireVirtualMemory(bytes_per_row,image->rows*sizeof(*pixels));
+    if (pixel_info == (MemoryInfo *) NULL)
+      {
+        (void) ThrowMagickException(exception,GetMagickModule(),CoderError,
+          "MemoryAllocationFailed","`%s'",image->filename);
+        status=MagickFalse;
+        break;
+      }
+
     if (basic_info.have_animation == JXL_TRUE)
       {
+        JxlBlendInfo
+          alpha_blend_info;
+
+        frame_header.duration=(uint32_t) image->delay;
+        if ((image->previous == (Image *) NULL) ||
+            (image->previous->dispose == BackgroundDispose) ||
+            (image->previous->dispose == PreviousDispose))
+          {
+            frame_header.layer_info.blend_info.blendmode=JXL_BLEND_REPLACE;
+            frame_header.layer_info.blend_info.source=0;
+          }
+        else
+          {
+            frame_header.layer_info.blend_info.blendmode=JXL_BLEND_BLEND;
+            frame_header.layer_info.blend_info.source=1;
+          }
+        frame_header.layer_info.save_as_reference=1;
+        if ((image->page.width != 0) && (image->page.height != 0))
+          {
+            frame_header.layer_info.have_crop=JXL_TRUE;
+            frame_header.layer_info.crop_x0=(int32_t) image->page.x;
+            frame_header.layer_info.crop_y0=(int32_t) image->page.y;
+            frame_header.layer_info.xsize=(uint32_t) image->columns;
+            frame_header.layer_info.ysize=(uint32_t) image->rows;
+          }
         jxl_status=JxlEncoderSetFrameHeader(frame_settings,&frame_header);
         if (jxl_status != JXL_ENC_SUCCESS)
           break;
+        if (basic_info.num_extra_channels > 0)
+          {
+            JxlEncoderInitBlendInfo(&alpha_blend_info);
+            alpha_blend_info.blendmode=frame_header.layer_info.blend_info.blendmode;
+            alpha_blend_info.source=frame_header.layer_info.blend_info.source;
+            (void) JxlEncoderSetExtraChannelBlendInfo(frame_settings,0,&alpha_blend_info);
+          }
       }
     pixels=(unsigned char *) GetVirtualMemoryBlob(pixel_info);
     if (IsGrayColorspace(image->colorspace) != MagickFalse)
@@ -1173,16 +1377,18 @@ static MagickBooleanType WriteJXLImage(const ImageInfo *image_info,Image *image,
     next=GetNextImageInList(image);
     if (next == (Image*) NULL)
       break;
-    if ((next->columns != image->columns) || (next->rows != image->rows))
+    if (JXLSameFrameType(image,next) == MagickFalse)
       {
        (void) ThrowMagickException(exception,GetMagickModule(),ImageError,
          "FramesNotSameDimensions","`%s'",image->filename);
        status=MagickFalse;
        break;
       }
+    pixel_info=RelinquishVirtualMemory(pixel_info);
     image=SyncNextImageInList(image);
   } while (image_info->adjoin != MagickFalse);
-  pixel_info=RelinquishVirtualMemory(pixel_info);
+  if (pixel_info != (MemoryInfo *) NULL)
+    pixel_info=RelinquishVirtualMemory(pixel_info);
   if (jxl_status == JXL_ENC_SUCCESS)
     {
       unsigned char

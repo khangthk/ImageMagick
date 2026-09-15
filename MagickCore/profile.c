@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -92,6 +92,67 @@ static void
   WriteTo8BimProfile(Image *,const char*,const StringInfo *);
 
 /*
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%                                                                             %
+%                                                                             %
+%                                                                             %
+%   A p p e n d I m a g e P r o f i l e P r o p e r t y                       %
+%                                                                             %
+%                                                                             %
+%                                                                             %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+%  AppendImageProfileProperty() appends a semicolon-delimited value to an image
+%  property when the image contains the requested profile.
+%
+%  The format of the AppendImageProfileProperty method is:
+%
+%      void AppendImageProfileProperty(Image *image,const char *profile,
+%        const char *property,const char *value,ExceptionInfo *exception)
+%
+%  A description of each parameter follows:
+%
+%    o image: the image.
+%
+%    o profile: the image profile name.
+%
+%    o property: the image property name.
+%
+%    o value: the property value to append.
+%
+%    o exception: return any errors or warnings in this structure.
+%
+*/
+MagickPrivate void AppendImageProfileProperty(Image *image,const char *profile,
+  const char *property,const char *value,ExceptionInfo *exception)
+{
+  char
+    *property_value;
+
+  const char
+    *current;
+
+  assert(image != (Image *) NULL);
+  assert(image->signature == MagickCoreSignature);
+  assert(profile != (const char *) NULL);
+  assert(property != (const char *) NULL);
+  assert(value != (const char *) NULL);
+  if (GetImageProfile(image,profile) == (const StringInfo *) NULL)
+    return;
+  current=GetImageProperty(image,property,exception);
+  if ((current == (const char *) NULL) || (*current == '\0'))
+    {
+      (void) SetImageProperty(image,property,value,exception);
+      return;
+    }
+  property_value=AcquireString(current);
+  (void) ConcatenateString(&property_value,";");
+  (void) ConcatenateString(&property_value,value);
+  (void) SetImageProperty(image,property,property_value,exception);
+  property_value=DestroyString(property_value);
+}
+
+/*
   Typedef declarations
 */
 struct _ProfileInfo
@@ -143,6 +204,23 @@ typedef struct _CMSExceptionInfo
 %    o clone_image: the clone image.
 %
 */
+
+typedef char
+  *(*CloneKeyFunc)(const char *);
+
+typedef StringInfo
+  *(*CloneValueFunc)(const StringInfo *);
+
+static inline void *CloneProfileKey(void *key)
+{
+  return((void *) ((CloneKeyFunc) ConstantString)((const char *) key));
+}
+
+static inline void *CloneProfileValue(void *value)
+{
+  return((void *) ((CloneValueFunc) CloneStringInfo)((const StringInfo *) value));
+}
+
 MagickExport MagickBooleanType CloneImageProfiles(Image *image,
   const Image *clone_image)
 {
@@ -157,7 +235,7 @@ MagickExport MagickBooleanType CloneImageProfiles(Image *image,
       if (image->profiles != (void *) NULL)
         DestroyImageProfiles(image);
       image->profiles=CloneSplayTree((SplayTreeInfo *) clone_image->profiles,
-        (void *(*)(void *)) ConstantString,(void *(*)(void *)) CloneStringInfo);
+        CloneProfileKey,CloneProfileValue);
     }
   return(MagickTrue);
 }
@@ -543,7 +621,7 @@ static void TransformDoublePixels(const int id,const Image* image,
       }
     if (source_info->channels > 3)
       *p++=GetLCMSPixel(source_info,GetPixelBlack(image,q),3);
-    q+=GetPixelChannels(image);
+    q+=(ptrdiff_t) GetPixelChannels(image);
   }
   cmsDoTransform(transform[id],source_info->pixels[id],target_info->pixels[id],
     (unsigned int) image->columns);
@@ -568,7 +646,7 @@ static void TransformDoublePixels(const int id,const Image* image,
         SetPixelBlack(image,SetLCMSPixel(target_info,*p,3),q);
         p++;
       }
-    q+=GetPixelChannels(image);
+    q+=(ptrdiff_t) GetPixelChannels(image);
   }
 }
 
@@ -593,7 +671,7 @@ static void TransformQuantumPixels(const int id,const Image* image,
       }
     if (source_info->channels > 3)
       *p++=GetPixelBlack(image,q);
-    q+=GetPixelChannels(image);
+    q+=(ptrdiff_t) GetPixelChannels(image);
   }
   cmsDoTransform(transform[id],source_info->pixels[id],target_info->pixels[id],
     (unsigned int) image->columns);
@@ -612,7 +690,7 @@ static void TransformQuantumPixels(const int id,const Image* image,
       }
     if (target_info->channels > 3)
       SetPixelBlack(image,*p++,q);
-    q+=GetPixelChannels(image);
+    q+=(ptrdiff_t) GetPixelChannels(image);
   }
 }
 
@@ -1143,8 +1221,10 @@ MagickExport MagickBooleanType ProfileImage(Image *image,const char *name,
                     source_info.scale[0]=100.0;
                     source_info.scale[1]=255.0;
                     source_info.scale[2]=255.0;
+#if !defined(MAGICKCORE_HDRI_SUPPORT)
                     source_info.translate[1]=(-0.5);
                     source_info.translate[2]=(-0.5);
+#endif
                   }
 #if (MAGICKCORE_QUANTUM_DEPTH == 8)
                 else
@@ -1237,8 +1317,10 @@ MagickExport MagickBooleanType ProfileImage(Image *image,const char *name,
                     target_info.scale[0]=0.01;
                     target_info.scale[1]=1/255.0;
                     target_info.scale[2]=1/255.0;
+#if !defined(MAGICKCORE_HDRI_SUPPORT)
                     target_info.translate[1]=0.5;
                     target_info.translate[2]=0.5;
+#endif
                   }
 #if (MAGICKCORE_QUANTUM_DEPTH == 8)
                 else
@@ -1273,7 +1355,7 @@ MagickExport MagickBooleanType ProfileImage(Image *image,const char *name,
                   target_info.type=(cmsUInt32Number) TYPE_XYZ_8;
 #elif (MAGICKCORE_QUANTUM_DEPTH == 16)
                 else
-                  source_info.type=(cmsUInt32Number) TYPE_XYZ_16;
+                  target_info.type=(cmsUInt32Number) TYPE_XYZ_16;
 #endif
                 break;
               }
@@ -1429,6 +1511,8 @@ MagickExport MagickBooleanType ProfileImage(Image *image,const char *name,
             if ((status != MagickFalse) &&
                 (cmsGetDeviceClass(source_info.profile) != cmsSigLinkClass))
               status=SetImageProfilePrivate(image,profile,exception);
+            else
+              profile=DestroyStringInfo(profile);
             if (target_info.profile != (cmsHPROFILE) NULL)
               (void) cmsCloseProfile(target_info.profile);
           }
@@ -1499,7 +1583,7 @@ MagickExport StringInfo *RemoveImageProfile(Image *image,const char *name)
 %
 %  The format of the ResetImageProfileIterator method is:
 %
-%      ResetImageProfileIterator(Image *image)
+%      void ResetImageProfileIterator(const Image *image)
 %
 %  A description of each parameter follows:
 %
@@ -1641,10 +1725,10 @@ static void WriteTo8BimProfile(Image *image,const char *name,
     q=p;
     if (LocaleNCompare((char *) p,"8BIM",4) != 0)
       break;
-    p+=4;
+    p+=(ptrdiff_t) 4;
     p=ReadResourceShort(p,&id);
     p=ReadResourceByte(p,&length_byte);
-    p+=length_byte;
+    p+=(ptrdiff_t) length_byte;
     if (((length_byte+1) & 0x01) != 0)
       p++;
     if (p > (datum+length-4))
@@ -1656,7 +1740,7 @@ static void WriteTo8BimProfile(Image *image,const char *name,
     if ((count < 0) || (p > (datum+length-count)) || (count > (ssize_t) length))
       break;
     if (id != profile_id)
-      p+=count;
+      p+=(ptrdiff_t) count;
     else
       {
         size_t
@@ -1734,10 +1818,10 @@ static void GetProfilesFromResourceBlock(Image *image,
   {
     if (LocaleNCompare((char *) p,"8BIM",4) != 0)
       break;
-    p+=4;
+    p+=(ptrdiff_t) 4;
     p=ReadResourceShort(p,&id);
     p=ReadResourceByte(p,&length_byte);
-    p+=length_byte;
+    p+=(ptrdiff_t) length_byte;
     if (((length_byte+1) & 0x01) != 0)
       p++;
     if (p > (datum+length-4))
@@ -1760,7 +1844,7 @@ static void GetProfilesFromResourceBlock(Image *image,
         /*
           Resolution.
         */
-        if (count < 10)
+        if (count < 16)
           break;
         p=ReadResourceLong(p,&resolution);
         image->resolution.x=((double) resolution)/65536.0;
@@ -1789,7 +1873,7 @@ static void GetProfilesFromResourceBlock(Image *image,
         if (profile != (StringInfo *) NULL)
           (void) SetImageProfileInternal(image,GetStringInfoName(profile),
             profile,MagickTrue,exception);
-        p+=count;
+        p+=(ptrdiff_t) count;
         break;
       }
       case 0x040c:
@@ -1797,7 +1881,7 @@ static void GetProfilesFromResourceBlock(Image *image,
         /*
           Thumbnail.
         */
-        p+=count;
+        p+=(ptrdiff_t) count;
         break;
       }
       case 0x040f:
@@ -1809,7 +1893,7 @@ static void GetProfilesFromResourceBlock(Image *image,
         if (profile != (StringInfo *) NULL)
           (void) SetImageProfileInternal(image,GetStringInfoName(profile),
             profile,MagickTrue,exception);
-        p+=count;
+        p+=(ptrdiff_t) count;
         break;
       }
       case 0x0422:
@@ -1821,7 +1905,7 @@ static void GetProfilesFromResourceBlock(Image *image,
         if (profile != (StringInfo *) NULL)
           (void) SetImageProfileInternal(image,GetStringInfoName(profile),
             profile,MagickTrue,exception);
-        p+=count;
+        p+=(ptrdiff_t) count;
         break;
       }
       case 0x0424:
@@ -1833,12 +1917,12 @@ static void GetProfilesFromResourceBlock(Image *image,
         if (profile != (StringInfo *) NULL)
           (void) SetImageProfileInternal(image,GetStringInfoName(profile),
             profile,MagickTrue,exception);
-        p+=count;
+        p+=(ptrdiff_t) count;
         break;
       }
       default:
       {
-        p+=count;
+        p+=(ptrdiff_t) count;
         break;
       }
     }
@@ -1867,7 +1951,7 @@ static void PatchCorruptProfile(const char *name,StringInfo *profile)
       p=(unsigned char *) strstr((const char *) p,"<?xpacket end=\"w\"?>");
       if (p != (unsigned char *) NULL)
         {
-          p+=19;
+          p+=(ptrdiff_t) 19;
           length=(size_t) (p-GetStringInfoDatum(profile));
           if (length != GetStringInfoLength(profile))
             {
@@ -1877,7 +1961,8 @@ static void PatchCorruptProfile(const char *name,StringInfo *profile)
         }
       return;
     }
-  if (LocaleCompare(name,"exif") == 0)
+  if (((LocaleCompare(name, "exif") == 0) || (LocaleCompare(name, "app1") == 0)) &&
+      (GetStringInfoLength(profile) > 2))
     {
       /*
         Check if profile starts with byte order marker instead of Exif.
@@ -1978,18 +2063,27 @@ static MagickBooleanType SetImageProfileInternal(Image *image,const char *name,
     image->profiles=NewSplayTree(CompareSplayTreeString,RelinquishMagickMemory,
       DestroyProfile);
   (void) CopyMagickString(key,name,MagickPathExtent);
-  LocaleLower(key);
+  /*
+   * When an app1 profile starts with an exif header then store it as an exif
+   * profile instead. The PatchCorruptProfile method already ensures that the
+   * profile starts with exif instead of MM or II.
+   */
+  if ((length > 4) && (LocaleCompare(key,"app1") == 0) && 
+      (LocaleNCompare((const char *) GetStringInfoDatum(profile),"exif",4) == 0))
+    (void) CopyMagickString(key,"exif",MagickPathExtent);
+  else
+    LocaleLower(key);
   status=AddValueToSplayTree((SplayTreeInfo *) image->profiles,
     ConstantString(key),profile);
   if (status == MagickFalse)
     profile=DestroyStringInfo(profile);
   else
     {
-      if (LocaleCompare(name,"8bim") == 0)
+      if (LocaleCompare(key,"8bim") == 0)
         GetProfilesFromResourceBlock(image,profile,exception);
       else
         if (recursive == MagickFalse)
-          WriteTo8BimProfile(image,name,profile);
+          WriteTo8BimProfile(image,key,profile);
     }
   return(status);
 }
@@ -2101,12 +2195,12 @@ static inline signed short ReadProfileShort(const EndianType endian,
       value=(unsigned short) buffer[1] << 8;
       value|=(unsigned short) buffer[0];
       quantum.unsigned_value=value & 0xffff;
-      return(quantum.signed_value);
+      return((signed short) quantum.signed_value);
     }
   value=(unsigned short) buffer[0] << 8;
   value|=(unsigned short) buffer[1];
   quantum.unsigned_value=value & 0xffff;
-  return(quantum.signed_value);
+  return((signed short) quantum.signed_value);
 }
 
 static inline signed int ReadProfileLong(const EndianType endian,
@@ -2208,14 +2302,36 @@ static void WriteProfileShort(const EndianType endian,
   (void) memcpy(p,buffer,2);
 }
 
+static inline void WriteProfileDimension(const EndianType endian,
+  const size_t dimension,const ssize_t format,const int components,
+  unsigned char *entry,unsigned char *value)
+{
+  if ((components != 1) || ((format != 3) && (format != 4)))
+    return;
+  if ((format == 3) && (dimension <= MAGICK_USHORT_MAX))
+    {
+      WriteProfileShort(endian,(unsigned short) dimension,value);
+      return;
+    }
+  if (dimension > UINT32_MAX)
+    return;
+  if (format == 3)
+    WriteProfileShort(endian,4,entry+2);
+  WriteProfileLong(endian,dimension,value);
+}
+
 static void SyncExifProfile(const Image *image,unsigned char *exif,
   size_t length)
 {
 #define MaxDirectoryStack  16
 #define EXIF_DELIMITER  "\n"
 #define EXIF_NUM_FORMATS  12
+#define TAG_IMAGE_WIDTH  0x0100
+#define TAG_IMAGE_LENGTH  0x0101
 #define TAG_EXIF_OFFSET  0x8769
 #define TAG_INTEROP_OFFSET  0xa005
+#define TAG_PIXEL_X_DIMENSION  0xa002
+#define TAG_PIXEL_Y_DIMENSION  0xa003
 
   typedef struct _DirectoryInfo
   {
@@ -2233,6 +2349,7 @@ static void SyncExifProfile(const Image *image,unsigned char *exif,
     endian;
 
   size_t
+    directory_length,
     entry,
     number_entries;
 
@@ -2248,7 +2365,9 @@ static void SyncExifProfile(const Image *image,unsigned char *exif,
     format_bytes[] = {0, 1, 1, 2, 4, 8, 1, 1, 2, 4, 8, 4, 8};
 
   unsigned char
-    *directory;
+    *directory,
+    *exif_directory,
+    *ifd0;
 
   if (length < 16)
     return;
@@ -2292,6 +2411,8 @@ static void SyncExifProfile(const Image *image,unsigned char *exif,
   if ((offset < 0) || ((size_t) offset >= length))
     return;
   directory=exif+offset;
+  exif_directory=(unsigned char *) NULL;
+  ifd0=directory;
   level=0;
   entry=0;
   exif_resources=NewSplayTree((int (*)(const void *,const void *)) NULL,
@@ -2309,7 +2430,13 @@ static void SyncExifProfile(const Image *image,unsigned char *exif,
     /*
       Determine how many entries there are in the current IFD.
     */
-    number_entries=(size_t) ReadProfileShort(endian,directory);
+    directory_length=length-(size_t) (directory-exif);
+    if (directory_length < 6)
+      continue;
+    number_entries=(size_t) (unsigned short) ReadProfileShort(endian,
+      directory);
+    if (number_entries > ((directory_length-6)/12))
+      continue;
     for ( ; entry < number_entries; entry++)
     {
       int
@@ -2323,7 +2450,9 @@ static void SyncExifProfile(const Image *image,unsigned char *exif,
         number_bytes;
 
       ssize_t
-        format,
+        format;
+
+      unsigned short
         tag_value;
 
       q=(unsigned char *) (directory+2+(12*entry));
@@ -2332,7 +2461,7 @@ static void SyncExifProfile(const Image *image,unsigned char *exif,
       if (GetValueFromSplayTree(exif_resources,q) == q)
         break;
       (void) AddValueToSplayTree(exif_resources,q,q);
-      tag_value=(ssize_t) ReadProfileShort(endian,q);
+      tag_value=(unsigned short) ReadProfileShort(endian,q);
       format=(ssize_t) ReadProfileShort(endian,q+2);
       if ((format < 0) || ((format-1) >= EXIF_NUM_FORMATS))
         break;
@@ -2359,8 +2488,26 @@ static void SyncExifProfile(const Image *image,unsigned char *exif,
         }
       switch (tag_value)
       {
+        case TAG_IMAGE_WIDTH:
+        case TAG_IMAGE_LENGTH:
+        {
+          if (directory == ifd0)
+            WriteProfileDimension(endian,tag_value == TAG_IMAGE_WIDTH ?
+              image->columns : image->rows,format,components,q,p);
+          break;
+        }
+        case TAG_PIXEL_X_DIMENSION:
+        case TAG_PIXEL_Y_DIMENSION:
+        {
+          if (directory == exif_directory)
+            WriteProfileDimension(endian,tag_value == TAG_PIXEL_X_DIMENSION ?
+              image->columns : image->rows,format,components,q,p);
+          break;
+        }
         case 0x011a:
         {
+          if (directory != ifd0)
+            break;
           (void) WriteProfileLong(endian,(size_t) (image->resolution.x+0.5),p);
           if (number_bytes == 8)
             (void) WriteProfileLong(endian,1UL,p+4);
@@ -2368,6 +2515,8 @@ static void SyncExifProfile(const Image *image,unsigned char *exif,
         }
         case 0x011b:
         {
+          if (directory != ifd0)
+            break;
           (void) WriteProfileLong(endian,(size_t) (image->resolution.y+0.5),p);
           if (number_bytes == 8)
             (void) WriteProfileLong(endian,1UL,p+4);
@@ -2375,6 +2524,8 @@ static void SyncExifProfile(const Image *image,unsigned char *exif,
         }
         case 0x0112:
         {
+          if (directory != ifd0)
+            break;
           if (number_bytes == 4)
             {
               (void) WriteProfileLong(endian,(size_t) image->orientation,p);
@@ -2386,6 +2537,8 @@ static void SyncExifProfile(const Image *image,unsigned char *exif,
         }
         case 0x0128:
         {
+          if (directory != ifd0)
+            break;
           if (number_bytes == 4)
             {
               (void) WriteProfileLong(endian,((size_t) image->units)+1,p);
@@ -2397,11 +2550,16 @@ static void SyncExifProfile(const Image *image,unsigned char *exif,
         default:
           break;
       }
-      if ((tag_value == TAG_EXIF_OFFSET) || (tag_value == TAG_INTEROP_OFFSET))
+      if (((tag_value == TAG_EXIF_OFFSET) ||
+           (tag_value == TAG_INTEROP_OFFSET)) && (format == 4) &&
+          (components == 1) && (number_bytes == 4))
         {
           offset=(ssize_t) ReadProfileLong(endian,p);
-          if (((size_t) offset < length) && (level < (MaxDirectoryStack-2)))
+          if (((size_t) offset < (length-1)) &&
+              (level < (MaxDirectoryStack-2)))
             {
+              if ((directory == ifd0) && (tag_value == TAG_EXIF_OFFSET))
+                exif_directory=exif+offset;
               directory_stack[level].directory=directory;
               entry++;
               directory_stack[level].entry=entry;
@@ -2413,15 +2571,15 @@ static void SyncExifProfile(const Image *image,unsigned char *exif,
                 break;
               offset=(ssize_t) ReadProfileLong(endian,directory+2+(12*
                 number_entries));
-              if ((offset != 0) && ((size_t) offset < length) &&
+              if ((offset != 0) && ((size_t) offset < (length-1)) &&
                   (level < (MaxDirectoryStack-2)))
                 {
                   directory_stack[level].directory=exif+offset;
                   directory_stack[level].entry=0;
                   level++;
                 }
+              break;
             }
-          break;
         }
     }
   } while (level > 0);
@@ -2461,7 +2619,7 @@ static void Sync8BimProfile(const Image *image,const StringInfo *profile)
     count=(ssize_t) ReadProfileByte(&p,&length);
     if ((count >= (ssize_t) length) || (count < 0))
       return;
-    p+=count;
+    p+=(ptrdiff_t) count;
     length-=(size_t) count;
     if ((*p & 0x01) == 0)
       (void) ReadProfileByte(&p,&length);
@@ -2471,23 +2629,23 @@ static void Sync8BimProfile(const Image *image,const StringInfo *profile)
     if ((id == 0x3ED) && (count == 16))
       {
         if (image->units == PixelsPerCentimeterResolution)
-          WriteProfileLong(MSBEndian,(unsigned int) CastDoubleToLong(
+          WriteProfileLong(MSBEndian,(unsigned int) CastDoubleToSsizeT(
             image->resolution.x*2.54*65536.0),p);
         else
-          WriteProfileLong(MSBEndian,(unsigned int) CastDoubleToLong(
+          WriteProfileLong(MSBEndian,(unsigned int) CastDoubleToSsizeT(
             image->resolution.x*65536.0),p);
         WriteProfileShort(MSBEndian,(unsigned short) image->units,p+4);
         if (image->units == PixelsPerCentimeterResolution)
-          WriteProfileLong(MSBEndian,(unsigned int) CastDoubleToLong(
+          WriteProfileLong(MSBEndian,(unsigned int) CastDoubleToSsizeT(
             image->resolution.y*2.54*65536.0),p+8);
         else
-          WriteProfileLong(MSBEndian,(unsigned int) CastDoubleToLong(
+          WriteProfileLong(MSBEndian,(unsigned int) CastDoubleToSsizeT(
             image->resolution.y*65536.0),p+8);
         WriteProfileShort(MSBEndian,(unsigned short) image->units,p+12);
       }
     if (id == 0x0422)
       SyncExifProfile(image,p,(size_t) count);
-    p+=count;
+    p+=(ptrdiff_t) count;
     length-=(size_t) count;
   }
   return;
@@ -2547,29 +2705,87 @@ static MagickBooleanType GetXmpOffsets(const StringInfo *profile,
   return(MagickTrue);
 }
 
+static MagickBooleanType TryAccumulate(const double term,
+  const unsigned long previous,const unsigned long before_previous,
+  unsigned long *result)
+{
+  double
+    accumulated;
+
+  *result=0;
+  if (term > (double) MAGICK_ULONG_MAX)
+    return(MagickFalse);
+  accumulated=(term*previous)+before_previous;
+  if ((accumulated < 0.0) || (accumulated > (double) MAGICK_ULONG_MAX))
+    return(MagickFalse);
+  *result=(unsigned long) accumulated;
+  return(MagickTrue);
+}
+
 static void GetXmpNumeratorAndDenominator(double value,
   unsigned long *numerator,unsigned long *denominator)
 {
   double
-    df;
+    remainder;
+
+  unsigned long
+    den,
+    new_den,
+    new_num,
+    num,
+    prev_den,
+    prev_num;
+
+  ssize_t
+    i;
 
   *numerator=0;
   *denominator=1;
   if (value <= MagickEpsilon)
     return;
-  *numerator=1;
-  df=1.0;
-  while(fabs(df - value) > MagickEpsilon)
+  if (value > (double) MAGICK_ULONG_MAX)
+    {
+      *numerator=MAGICK_ULONG_MAX;
+      *denominator=1;
+      return;
+    }
+  if (floor(value) == value)
+    {
+      *numerator=(unsigned long) value;
+      *denominator=1;
+      return;
+    }
+  num=1;
+  prev_num=0;
+  den=0;
+  prev_den=1;
+  remainder=value;
+  for (i=0; i < 128; i++)
   {
-    if (df < value)
-      (*numerator)++;
-    else
-      {
-        (*denominator)++;
-        *numerator=(unsigned long) (value*(*denominator));
-      }
-    df=*numerator/(double)*denominator;
+    double
+      approximation,
+      fraction,
+      term;
+
+    term=floor(remainder);
+    if ((TryAccumulate(term,num,prev_num,&new_num) == MagickFalse) ||
+        (TryAccumulate(term,den,prev_den,&new_den) == MagickFalse) ||
+        (new_den == 0))
+      break;
+    prev_num=num;
+    num=new_num;
+    prev_den=den;
+    den=new_den;
+    approximation=num/(double) den;
+    if (fabs(approximation-value) <= MagickEpsilon)
+      break;
+    fraction=remainder-term;
+    if (fraction <= 0.0)
+      break;
+    remainder=1.0/fraction;
   }
+  *numerator=num;
+  *denominator=(den == 0 ? 1 : den);
 }
 
 static void SyncXmpProfile(const Image *image,StringInfo *profile)

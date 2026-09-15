@@ -1,12 +1,12 @@
 /*
   Copyright @ 1999 ImageMagick Studio LLC, a non-profit organization
   dedicated to making software imaging solutions freely available.
-  
+
   You may not use this file except in compliance with the License.  You may
   obtain a copy of the License at
-  
-    https://imagemagick.org/script/license.php
-  
+
+    https://imagemagick.org/license/
+
   Unless required by applicable law or agreed to in writing, software
   distributed under the License is distributed on an "AS IS" BASIS,
   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,6 +21,42 @@
 #if defined(__cplusplus) || defined(c_plusplus)
 extern "C" {
 #endif
+
+#include "MagickCore/constitute.h"
+#include "MagickCore/exception.h"
+#include "MagickCore/log.h"
+#include "MagickCore/magick.h"
+#include "MagickCore/magick-private.h"
+#include "MagickCore/utility.h"
+
+static inline Image *StrictReadImage(const ImageInfo *image_info,
+  ExceptionInfo *exception)
+{
+  char
+    magic[MagickPathExtent];
+
+  (void) GetPathComponent(image_info->filename,MagickPath,magic);
+  if (*magic != '\0')
+    {
+      const MagickInfo *magick_info = GetMagickInfo(magic,exception);
+      if ((magick_info != (const MagickInfo *) NULL) &&
+          (GetMagickExplicitAllowed(magick_info) != MagickFalse))
+        return(ReadImage(image_info,exception));
+      else
+        {
+          (void) ThrowMagickException(exception,GetMagickModule(),ImageError,
+            "ExplicitCoderNotAllowed","`%s'",image_info->filename);
+          return((Image *) NULL);
+        }
+    }
+  if (IsPathAccessible(image_info->filename) == MagickFalse)
+    {
+      (void) ThrowMagickException(exception,GetMagickModule(),FileOpenError,
+        "UnableToOpenFile","`%s'",image_info->filename);
+      return((Image *) NULL);
+    }
+  return(ReadImage(image_info,exception));
+}
 
 #if defined(__cplusplus) || defined(c_plusplus)
 }

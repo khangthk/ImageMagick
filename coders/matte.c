@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -198,8 +198,8 @@ static MagickBooleanType WriteMATTEImage(const ImageInfo *image_info,
       SetPixelGreen(matte_image,GetPixelAlpha(image,p),q);
       SetPixelBlue(matte_image,GetPixelAlpha(image,p),q);
       SetPixelAlpha(matte_image,OpaqueAlpha,q);
-      p+=GetPixelChannels(image);
-      q+=GetPixelChannels(matte_image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(matte_image);
     }
     if (SyncAuthenticPixels(matte_image,exception) == MagickFalse)
       break;

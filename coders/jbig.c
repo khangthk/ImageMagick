@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -193,10 +193,17 @@ static Image *ReadJBIGImage(const ImageInfo *image_info,
         count;
 
       status=(MagickStatusType) jbg_dec_in(&jbig_info,p,(size_t) length,&count);
-      p+=count;
+      p+=(ptrdiff_t) count;
       length-=(ssize_t) count;
     }
   } while ((status == JBG_EAGAIN) || (status == JBG_EOK));
+  if (status != JBG_EOK)
+    {
+      jbg_dec_free(&jbig_info);
+      buffer=(unsigned char *) RelinquishMagickMemory(buffer);
+      ThrowReaderException(CorruptImageError,"UnableToReadImageData");
+    }
+
   /*
     Create colormap.
   */
@@ -246,14 +253,14 @@ static Image *ReadJBIGImage(const ImageInfo *image_info,
     {
       if (bit == 0)
         byte=(*p++);
-      index=(byte & 0x80) ? 0 : 1;
+      index=(Quantum) ((byte & 0x80) ? 0 : 1);
       bit++;
       byte<<=1;
       if (bit == 8)
         bit=0;
       SetPixelIndex(image,index,q);
       SetPixelViaPixelInfo(image,image->colormap+(ssize_t) index,q);
-      q+=GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncAuthenticPixels(image,exception) == MagickFalse)
       break;
@@ -492,7 +499,7 @@ static MagickBooleanType WriteJBIGImage(const ImageInfo *image_info,
             bit=0;
             byte=0;
           }
-        p+=GetPixelChannels(image);
+        p+=(ptrdiff_t) GetPixelChannels(image);
       }
       if (bit != 0)
         *q++=byte << (8-bit);
@@ -529,15 +536,15 @@ static MagickBooleanType WriteJBIGImage(const ImageInfo *image_info,
               flags;
 
             flags=ParseGeometry(image_info->density,&geometry_info);
-            x_resolution=geometry_info.rho;
-            y_resolution=geometry_info.sigma;
+            x_resolution=(size_t) geometry_info.rho;
+            y_resolution=(size_t) geometry_info.sigma;
             if ((flags & SigmaValue) == 0)
               y_resolution=x_resolution;
           }
         if (image->units == PixelsPerCentimeterResolution)
           {
-            x_resolution=(size_t) (100.0*2.54*x_resolution+0.5)/100.0;
-            y_resolution=(size_t) (100.0*2.54*y_resolution+0.5)/100.0;
+            x_resolution=(size_t) ((100.0*2.54*x_resolution+0.5)/100.0);
+            y_resolution=(size_t) ((100.0*2.54*y_resolution+0.5)/100.0);
           }
         (void) jbg_enc_lrlmax(&jbig_info,(unsigned long) x_resolution,
           (unsigned long) y_resolution);

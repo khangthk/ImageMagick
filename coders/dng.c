@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -179,7 +179,7 @@ static void SetDNGProperties(Image *image,const libraw_data_t *raw_info,
     (void) SetImageProperty(image,"dng:serial.number",
       raw_info->shootinginfo.BodySerial,exception);
   (void) FormatImageProperty(image,"dng:exposure.time","1/%.0g",
-    (double) PerceptibleReciprocal(raw_info->other.shutter));
+    (double) MagickSafeReciprocal(raw_info->other.shutter));
   (void) FormatImageProperty(image,"dng:f.number","%0.1g",
     (double) raw_info->other.aperture);
   (void) FormatImageProperty(image,"dng:max.aperture.value","%0.1g",
@@ -332,7 +332,11 @@ static void SetLibRawParams(const ImageInfo *image_info,Image *image,
 }
 
 static void LibRawDataError(void *data,const char *magick_unused(file),
+#if LIBRAW_COMPILE_CHECK_VERSION_NOTLESS(0,22)
+  const INT64 offset)
+#else
   const int offset)
+#endif
 {
   magick_unreferenced(file);
   if (offset >= 0)
@@ -345,7 +349,7 @@ static void LibRawDataError(void *data,const char *magick_unused(file),
       */
       exception=(ExceptionInfo *) data;
       (void) ThrowMagickException(exception,GetMagickModule(),
-        CorruptImageWarning,"Data corrupted at","`%d'",offset);
+        CorruptImageWarning,"Data corrupted at","`%d'",(int) offset);
   }
 }
 
@@ -398,7 +402,29 @@ static void ReadLibRawThumbnail(const ImageInfo *image_info,Image *image,
     libraw_dcraw_clear_mem(thumbnail);
 }
 
-static OrientationType LibRawFlipToOrientation(int flip)
+static void ReadLibRawProfiles(Image *image,const libraw_data_t *raw_info,
+  ExceptionInfo* exception)
+{
+  StringInfo
+    *profile;
+
+  if (raw_info->color.profile != NULL)
+    {
+      profile=BlobToProfileStringInfo("icc",raw_info->color.profile,
+        raw_info->color.profile_length,exception);
+      (void) SetImageProfilePrivate(image,profile,exception);
+    }
+#if LIBRAW_COMPILE_CHECK_VERSION_NOTLESS(0,18)
+  if (raw_info->idata.xmpdata != NULL)
+    {
+      profile=BlobToProfileStringInfo("xmp",raw_info->idata.xmpdata,
+        raw_info->idata.xmplen,exception);
+      (void) SetImageProfilePrivate(image,profile,exception);
+    }
+#endif
+}
+
+static inline OrientationType LibRawFlipToOrientation(int flip)
 {
   switch(flip)
   {
@@ -416,7 +442,92 @@ static OrientationType LibRawFlipToOrientation(int flip)
     }
   }
 }
+#endif
 
+#if defined(MAGICKCORE_RAW_R_DELEGATE)
+static MagickBooleanType UnpackLibRawImage(Image *image,const ImageInfo *image_info,
+  libraw_data_t *raw_info,int *errcode,ExceptionInfo *exception)
+{
+  libraw_processed_image_t
+    *raw_image;
+
+  MagickBooleanType
+    status;
+
+  ssize_t
+    y;
+
+  unsigned short
+    *p;
+
+  *errcode=libraw_unpack(raw_info);
+  if (*errcode != LIBRAW_SUCCESS)
+    return(MagickFalse);
+  SetLibRawParams(image_info,image,raw_info);
+  *errcode=libraw_dcraw_process(raw_info);
+  if (*errcode != LIBRAW_SUCCESS)
+    return(MagickFalse);
+  raw_image=libraw_dcraw_make_mem_image(raw_info,errcode);
+  if ((*errcode != LIBRAW_SUCCESS) ||
+      (raw_image == (libraw_processed_image_t *) NULL) ||
+      (raw_image->type != LIBRAW_IMAGE_BITMAP) || (raw_image->bits != 16) ||
+      (raw_image->colors < 1) || (raw_image->colors > 4))
+    {
+      if (raw_image != (libraw_processed_image_t *) NULL)
+        libraw_dcraw_clear_mem(raw_image);
+      return(MagickFalse);
+    }
+  if (raw_image->colors < 3)
+    {
+      image->colorspace=GRAYColorspace;
+      image->type=raw_image->colors == 1 ? GrayscaleType : GrayscaleAlphaType;
+    }
+  image->columns=raw_image->width;
+  image->rows=raw_image->height;
+  image->depth=raw_image->bits;
+  status=SetImageExtent(image,image->columns,image->rows,exception);
+  if (status == MagickFalse)
+    {
+      libraw_dcraw_clear_mem(raw_image);
+      return(MagickFalse);
+    }
+  p=(unsigned short *) raw_image->data;
+  for (y=0; y < (ssize_t) image->rows; y++)
+  {
+    Quantum
+      *q;
+
+    ssize_t
+      x;
+
+    q=QueueAuthenticPixels(image,0,y,image->columns,1,exception);
+    if (q == (Quantum *) NULL)
+      break;
+    for (x=0; x < (ssize_t) image->columns; x++)
+    {
+      SetPixelRed(image,ScaleShortToQuantum(*p++),q);
+      if (raw_image->colors > 2)
+        {
+          SetPixelGreen(image,ScaleShortToQuantum(*p++),q);
+          SetPixelBlue(image,ScaleShortToQuantum(*p++),q);
+        }
+      if ((raw_image->colors == 2) || (raw_image->colors > 3))
+        SetPixelAlpha(image,ScaleShortToQuantum(*p++),q);
+      q+=(ptrdiff_t) GetPixelChannels(image);
+    }
+    if (SyncAuthenticPixels(image,exception) == MagickFalse)
+      break;
+    if (image->previous == (Image *) NULL)
+      {
+        status=SetImageProgress(image,LoadImageTag,(MagickOffsetType) y,
+          image->rows);
+        if (status == MagickFalse)
+          break;
+      }
+  }
+  libraw_dcraw_clear_mem(raw_image);
+  return(MagickTrue);
+}
 #endif
 
 static Image *ReadDNGImage(const ImageInfo *image_info,ExceptionInfo *exception)
@@ -455,20 +566,8 @@ static Image *ReadDNGImage(const ImageInfo *image_info,ExceptionInfo *exception)
     libraw_data_t
       *raw_info;
 
-    libraw_processed_image_t
-      *raw_image;
-
-    ssize_t
-      y;
-
-    StringInfo
-      *profile;
-
     unsigned int
       flags;
-
-    unsigned short
-      *p;
 
     errcode=LIBRAW_UNSPECIFIED_ERROR;
     flags=LIBRAW_OPIONS_NO_DATAERR_CALLBACK;
@@ -489,7 +588,7 @@ static Image *ReadDNGImage(const ImageInfo *image_info,ExceptionInfo *exception)
       wchar_t
         *path;
 
-      path=create_wchar_path(image->filename);
+      path=NTCreateWidePath(image->filename);
       if (path != (wchar_t *) NULL)
         {
           errcode=libraw_open_wfile(raw_info,path);
@@ -514,6 +613,7 @@ static Image *ReadDNGImage(const ImageInfo *image_info,ExceptionInfo *exception)
     image->page.y=raw_info->sizes.top_margin;
     image->orientation=LibRawFlipToOrientation(raw_info->sizes.flip);
     ReadLibRawThumbnail(image_info,image,raw_info,exception);
+    ReadLibRawProfiles(image,raw_info,exception);
     SetDNGProperties(image,raw_info,exception);
     if (image_info->ping != MagickFalse)
       {
@@ -526,104 +626,15 @@ static Image *ReadDNGImage(const ImageInfo *image_info,ExceptionInfo *exception)
         libraw_close(raw_info);
         return(image);
       }
-    errcode=libraw_unpack(raw_info);
-    if (errcode != LIBRAW_SUCCESS)
-      {
-        (void) ThrowMagickException(exception,GetMagickModule(),CoderError,
-          libraw_strerror(errcode),"`%s'",image->filename);
-        libraw_close(raw_info);
-        return(DestroyImageList(image));
-      }
-    SetLibRawParams(image_info,image,raw_info);
-    errcode=libraw_dcraw_process(raw_info);
-    if (errcode != LIBRAW_SUCCESS)
-      {
-        (void) ThrowMagickException(exception,GetMagickModule(),CoderError,
-          libraw_strerror(errcode),"`%s'",image->filename);
-        libraw_close(raw_info);
-        return(DestroyImageList(image));
-      }
-    raw_image=libraw_dcraw_make_mem_image(raw_info,&errcode);
-    if ((errcode != LIBRAW_SUCCESS) ||
-        (raw_image == (libraw_processed_image_t *) NULL) ||
-        (raw_image->type != LIBRAW_IMAGE_BITMAP) || (raw_image->bits != 16) ||
-        (raw_image->colors < 1) || (raw_image->colors > 4))
-      {
-        if (raw_image != (libraw_processed_image_t *) NULL)
-          libraw_dcraw_clear_mem(raw_image);
-        (void) ThrowMagickException(exception,GetMagickModule(),CoderError,
-          libraw_strerror(errcode),"`%s'",image->filename);
-        libraw_close(raw_info);
-        return(DestroyImageList(image));
-      }
-    if (raw_image->colors < 3)
-      {
-        image->colorspace=GRAYColorspace;
-        image->type=raw_image->colors == 1 ? GrayscaleType : GrayscaleAlphaType;
-      }
-    image->columns=raw_image->width;
-    image->rows=raw_image->height;
-    image->depth=raw_image->bits;
-    status=SetImageExtent(image,image->columns,image->rows,exception);
-    if (status == MagickFalse)
-      {
-        libraw_dcraw_clear_mem(raw_image);
-        libraw_close(raw_info);
-        return(DestroyImageList(image));
-      }
-    p=(unsigned short *) raw_image->data;
-    for (y=0; y < (ssize_t) image->rows; y++)
-    {
-      Quantum
-        *q;
-
-      ssize_t
-        x;
-
-      q=QueueAuthenticPixels(image,0,y,image->columns,1,exception);
-      if (q == (Quantum *) NULL)
-        break;
-      for (x=0; x < (ssize_t) image->columns; x++)
-      {
-        SetPixelRed(image,ScaleShortToQuantum(*p++),q);
-        if (raw_image->colors > 2)
-          {
-            SetPixelGreen(image,ScaleShortToQuantum(*p++),q);
-            SetPixelBlue(image,ScaleShortToQuantum(*p++),q);
-          }
-        if ((raw_image->colors) == 2 || (raw_image->colors > 3))
-          SetPixelAlpha(image,ScaleShortToQuantum(*p++),q);
-        q+=GetPixelChannels(image);
-      }
-      if (SyncAuthenticPixels(image,exception) == MagickFalse)
-        break;
-      if (image->previous == (Image *) NULL)
-        {
-          status=SetImageProgress(image,LoadImageTag,(MagickOffsetType) y,
-            image->rows);
-          if (status == MagickFalse)
-            break;
-        }
-    }
-    libraw_dcraw_clear_mem(raw_image);
-    /*
-      Set DNG image metadata.
-    */
-    if (raw_info->color.profile != NULL)
-      {
-        profile=BlobToProfileStringInfo("icc",raw_info->color.profile,
-          raw_info->color.profile_length,exception);
-        (void) SetImageProfilePrivate(image,profile,exception);
-      }
-#if LIBRAW_COMPILE_CHECK_VERSION_NOTLESS(0,18)
-    if (raw_info->idata.xmpdata != NULL)
-      {
-        profile=BlobToProfileStringInfo("xmp",raw_info->idata.xmpdata,
-          raw_info->idata.xmplen,exception);
-        (void) SetImageProfilePrivate(image,profile,exception);
-      }
-#endif
+    status=UnpackLibRawImage(image,image_info,raw_info,&errcode,exception);
     libraw_close(raw_info);
+    if (status != MagickTrue)
+      {
+        if (errcode != LIBRAW_SUCCESS)
+          (void) ThrowMagickException(exception,GetMagickModule(),CoderError,
+            libraw_strerror(errcode),"`%s'",image->filename);
+        return(DestroyImageList(image));
+      }
     return(image);
   }
 #else

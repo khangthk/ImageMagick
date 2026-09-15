@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -1195,12 +1195,41 @@ static MagickBooleanType LoadConfigureCache(LinkedListInfo *cache,
     (void) CopyMagickString(keyword,token,MagickPathExtent);
     if (LocaleNCompare(keyword,"<!DOCTYPE",9) == 0)
       {
+        int
+          bracket_depth = 0,
+          quote = 0;
+
         /*
-          Doctype element.
+          DOCTYPE element.
         */
-        while ((LocaleNCompare(q,"]>",2) != 0) && (*q != '\0'))
-          (void) GetNextToken(q,&q,extent,token);
-        continue;
+        for ( ; *q != '\0'; q++)
+        {
+          if (quote != 0)
+            {
+              if (*q == quote)
+                quote=0;
+            }
+          else
+            {
+              if ((*q == '"') || (*q == '\''))
+                quote=(*q);
+              else
+                if (*q == '[')
+                  bracket_depth++;
+                else
+                  if (*q == ']')
+                    {
+                      if (bracket_depth > 0)
+                        bracket_depth--;
+                    }
+                  else
+                    if ((*q == '>') && (bracket_depth == 0))
+                      {
+                        q++;   /* consume final '>' */
+                        break;
+                      }
+            }
+        }
       }
     if (LocaleNCompare(keyword,"<!--",4) == 0)
       {

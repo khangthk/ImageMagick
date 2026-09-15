@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -229,7 +229,7 @@ static double GetEdgeBackgroundCensus(const Image *image,
       GetPixelInfoPixel(edge_image,p,&pixel);
       if (IsFuzzyEquivalencePixelInfo(&pixel,&background) == MagickFalse)
         census++;
-      p+=GetPixelChannels(edge_image);
+      p+=(ptrdiff_t) GetPixelChannels(edge_image);
     }
   }
   census/=((double) edge_image->columns*edge_image->rows);
@@ -533,7 +533,7 @@ MagickExport RectangleInfo GetImageBoundingBox(const Image *image,
           bounding_box.width=(size_t) x;
           bounding_box.height=(size_t) y;
         }
-      q+=GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
 #if defined(MAGICKCORE_OPENMP_SUPPORT)
 #  pragma omp critical (MagickCore_GetImageBoundingBox)
@@ -550,7 +550,9 @@ MagickExport RectangleInfo GetImageBoundingBox(const Image *image,
     }
   }
   image_view=DestroyCacheView(image_view);
-  if ((bounds.width == 0) || (bounds.height == 0))
+  if ((bounds.width == 0) || (bounds.height == 0) ||
+      (bounds.x > (ssize_t) bounds.width) ||
+      (bounds.y > (ssize_t) bounds.height))
     (void) ThrowMagickException(exception,GetMagickModule(),OptionWarning,
       "GeometryDoesNotContainImage","`%s'",image->filename);
   else
@@ -711,7 +713,7 @@ static PixelInfo GetEdgeBackgroundColor(const Image *image,
         GetPixelInfoPixel(edge_image,p,&pixel);
         if (IsFuzzyEquivalencePixelInfo(&pixel,background+i) == MagickFalse)
           census[i]++;
-        p+=GetPixelChannels(edge_image);
+        p+=(ptrdiff_t) GetPixelChannels(edge_image);
       }
     }
     edge_view=DestroyCacheView(edge_view);
@@ -845,7 +847,7 @@ MagickExport PointInfo *GetImageConvexHull(const Image *image,
           vertices[n].y=(double) y;
           n++;
         }
-      p+=GetPixelChannels(image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
     }
   }
   image_view=DestroyCacheView(image_view);
@@ -1028,7 +1030,7 @@ MagickExport size_t GetImageDepth(const Image *image,ExceptionInfo *exception)
             if (depth_map[ScaleQuantumToMap(p[j])] > current_depth[id])
               current_depth[id]=depth_map[ScaleQuantumToMap(p[j])];
           }
-          p+=GetPixelChannels(image);
+          p+=(ptrdiff_t) GetPixelChannels(image);
         }
         if (current_depth[id] == MAGICKCORE_QUANTUM_DEPTH)
           status=MagickFalse;
@@ -1094,7 +1096,7 @@ MagickExport size_t GetImageDepth(const Image *image,ExceptionInfo *exception)
           current_depth[id]++;
         }
       }
-      p+=GetPixelChannels(image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (current_depth[id] == MAGICKCORE_QUANTUM_DEPTH)
       status=MagickFalse;
@@ -1394,17 +1396,17 @@ MagickExport PointInfo *GetImageMinimumBoundingBox(Image *image,
 
         delta.x=bounding_box[(i+1) % 4].x-bounding_box[i].x;
         delta.y=bounding_box[(i+1) % 4].y-bounding_box[i].y;
-        slope=delta.y*PerceptibleReciprocal(delta.x);
+        slope=delta.y*MagickSafeReciprocal(delta.x);
         intercept=bounding_box[(i+1) % 4].y-slope*bounding_box[i].x;
         d=fabs((slope*bounding_box[i].x-bounding_box[i].y+intercept)*
-          PerceptibleReciprocal(sqrt(slope*slope+1.0)));
+          MagickSafeReciprocal(sqrt(slope*slope+1.0)));
         if ((i == 0) || (d < distance))
           {
             distance=d;
             point=delta;
           }
       }
-      angle=RadiansToDegrees(atan(point.y*PerceptibleReciprocal(point.x)));
+      angle=RadiansToDegrees(atan(point.y*MagickSafeReciprocal(point.x)));
       length=hypot(point.x,point.y);
       p_length=fabs((double) MagickMax(caliper_info.width,caliper_info.height)-
         length);
@@ -1614,7 +1616,7 @@ MagickExport ImageType IdentifyImageGray(const Image *image,
         }
       if ((type == BilevelType) && (IsPixelMonochrome(image,p) == MagickFalse))
         type=GrayscaleType;
-      p+=GetPixelChannels(image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
     }
   }
   image_view=DestroyCacheView(image_view);
@@ -1700,7 +1702,7 @@ MagickExport MagickBooleanType IdentifyImageMonochrome(const Image *image,
           type=UndefinedType;
           break;
         }
-      p+=GetPixelChannels(image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
     }
   }
   image_view=DestroyCacheView(image_view);
@@ -1909,7 +1911,7 @@ MagickExport MagickBooleanType IsImageOpaque(const Image *image,
           opaque=MagickFalse;
           break;
         }
-      p+=GetPixelChannels(image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
     }
   }
   image_view=DestroyCacheView(image_view);
@@ -2028,7 +2030,11 @@ static MagickBooleanType FloydSteinbergImageDepth(Image *image,
         channel=GetPixelChannelChannel(image,i);
         traits=GetPixelChannelTraits(image,channel);
         if ((traits & UpdatePixelTrait) == 0)
-          continue;
+          {
+            u++;
+            v++;
+            continue;
+          }
         pixel=(double) q[i]+distortion[u];
         q[i]=ScaleAnyToQuantum(ScaleQuantumToAny(ClampPixel((MagickRealType)
           pixel),range),range);
@@ -2052,7 +2058,7 @@ static MagickBooleanType FloydSteinbergImageDepth(Image *image,
         u++;
         v++;
       }
-      q+=GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncCacheViewAuthenticPixels(image_view,exception) == MagickFalse)
       {
@@ -2186,7 +2192,7 @@ MagickExport MagickBooleanType SetImageDepth(Image *image,
               continue;
             q[j]=depth_map[ScaleQuantumToMap(q[j])];
           }
-          q+=GetPixelChannels(image);
+          q+=(ptrdiff_t) GetPixelChannels(image);
         }
         if (SyncCacheViewAuthenticPixels(image_view,exception) == MagickFalse)
           {
@@ -2244,7 +2250,7 @@ MagickExport MagickBooleanType SetImageDepth(Image *image,
         q[i]=ScaleAnyToQuantum(ScaleQuantumToAny(ClampPixel((MagickRealType)
           q[i]),range),range);
       }
-      q+=GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncCacheViewAuthenticPixels(image_view,exception) == MagickFalse)
       {
@@ -2384,7 +2390,6 @@ MagickExport MagickBooleanType SetImageType(Image *image,const ImageType type,
       if ((image->alpha_trait & BlendPixelTrait) == 0)
         (void) SetImageAlphaChannel(image,OpaqueAlphaChannel,exception);
       quantize_info=AcquireQuantizeInfo(image_info);
-      quantize_info->colorspace=TransparentColorspace;
       status=QuantizeImage(quantize_info,image,exception);
       quantize_info=DestroyQuantizeInfo(quantize_info);
       break;

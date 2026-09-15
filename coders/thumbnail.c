@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -185,13 +185,15 @@ static MagickBooleanType WriteTHUMBNAILImage(const ImageInfo *image_info,
   profile=GetImageProfile(image,"exif");
   if (profile == (const StringInfo *) NULL)
     ThrowWriterException(CoderError,"ImageDoesNotHaveAThumbnail");
-  property=GetImageProperty(image,"exif:thumbnail:JPEGInterchangeFormat",exception);
+  property=GetImageProperty(image,"exif:Thumbnail.JPEGInterchangeFormat",
+    exception);
   if (property == (const char *) NULL)
     ThrowWriterException(CoderError,"ImageDoesNotHaveAThumbnail");
   offset=(ssize_t) StringToLong(property);
   if (offset < 0)
     ThrowWriterException(CoderError,"ImageDoesNotHaveAThumbnail");
-  property=GetImageProperty(image,"exif:thumbnail:JPEGInterchangeFormatLength",exception);
+  property=GetImageProperty(image,"exif:Thumbnail.JPEGInterchangeFormatLength",
+    exception);
   if (property == (const char *) NULL)
     ThrowWriterException(CoderError,"ImageDoesNotHaveAThumbnail");
   length=(size_t) StringToLong(property);

@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -192,16 +192,16 @@ static int ReadInt(Image * image,MagickBooleanType *eofInp,int *chPushed,
     *eofInp = MagickTrue;
   while (isdigit(chIn))
   {
-    *p=chIn;
+    *p=(char) chIn;
     p++;
     if (p-buffer >= MaxTextExtent)
       {
         *eofInp=MagickTrue;
-        continue;
+        break;
       }
     chIn=ReadChar(image,chPushed);
   }
-  if (p==buffer)
+  if (p == buffer)
     {
       *eofInp=MagickTrue;
       return(0);
@@ -335,7 +335,7 @@ static void ReadUntil(Image * image,int UntilChar,MagickBooleanType *eofInp,
           *eofInp=MagickTrue;
           break;
         }
-      buf[i++]=chIn;
+      buf[i++]=(char) chIn;
     }
   if (*eofInp)
     *chPushed='\0';
@@ -630,7 +630,7 @@ static Image *ReadFTXTImage(const ImageInfo *image_info,
                   if (q == (Quantum *) NULL)
                     break;
                   for (i=0; i< nExpCh; i++)
-                    q[i]=chVals[i];
+                    q[i]=(Quantum) chVals[i];
                   if (SyncAuthenticPixels(image,exception) == MagickFalse)
                     break;
                 }
@@ -831,8 +831,8 @@ ModuleExport void UnregisterFTXTImage(void)
 %    o exception: return any errors or warnings in this structure.
 %
 */
-static MagickBooleanType WriteFTXTImage(const ImageInfo *image_info,Image *image,
-  ExceptionInfo *exception)
+static MagickBooleanType WriteFTXTImage(const ImageInfo *image_info,
+  Image *image,ExceptionInfo *exception)
 {
   char
     buffer[MaxTextExtent],
@@ -1038,9 +1038,10 @@ static MagickBooleanType WriteFTXTImage(const ImageInfo *image_info,Image *image
               buffer[1]='\0';
               (void) WriteBlobString(image,buffer);
             }
-          pFmt++;
+          if (*pFmt)
+            pFmt++;
         }
-        p+=GetPixelChannels(image);
+        p+=(ptrdiff_t) GetPixelChannels(image);
       }
       if ((image->previous == (Image *) NULL) &&
           (image->progress_monitor != (MagickProgressMonitor) NULL) &&

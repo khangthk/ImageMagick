@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -61,6 +61,7 @@
 #include "MagickCore/quantum-private.h"
 #include "MagickCore/static.h"
 #include "MagickCore/string_.h"
+#include "MagickCore/string-private.h"
 #include "MagickCore/module.h"
 #include "MagickCore/utility.h"
 
@@ -196,6 +197,10 @@ static Image *ReadXBMImage(const ImageInfo *image_info,ExceptionInfo *exception)
   short int
     hex_digits[256];
 
+  size_t
+    bytes_per_line,
+    length;
+
   ssize_t
     i,
     x,
@@ -208,8 +213,6 @@ static Image *ReadXBMImage(const ImageInfo *image_info,ExceptionInfo *exception)
   unsigned int
     bit,
     byte,
-    bytes_per_line,
-    length,
     padding,
     version;
 
@@ -237,12 +240,12 @@ static Image *ReadXBMImage(const ImageInfo *image_info,ExceptionInfo *exception)
   height=0;
   *name='\0';
   while (ReadBlobString(image,buffer) != (char *) NULL)
-    if (sscanf(buffer,"#define %1024s %ld",name,&width) == 2)
+    if (MagickSscanf(buffer,"#define %1024s %ld",name,&width) == 2)
       if ((strlen(name) >= 6) &&
           (LocaleCompare(name+strlen(name)-6,"_width") == 0))
         break;
   while (ReadBlobString(image,buffer) != (char *) NULL)
-    if (sscanf(buffer,"#define %1024s %ld",name,&height) == 2)
+    if (MagickSscanf(buffer,"#define %1024s %ld",name,&height) == 2)
       if ((strlen(name) >= 7) &&
           (LocaleCompare(name+strlen(name)-7,"_height") == 0))
         break;
@@ -260,11 +263,11 @@ static Image *ReadXBMImage(const ImageInfo *image_info,ExceptionInfo *exception)
   offset=TellBlob(image);
   while (ReadBlobString(image,buffer) != (char *) NULL)
   {
-    if (sscanf(buffer,"static short %1024s = {",name) == 1)
+    if (MagickSscanf(buffer,"static short %1024s = {",name) == 1)
       version=10;
-    else if (sscanf(buffer,"static unsigned char %1024s = {",name) == 1)
+    else if (MagickSscanf(buffer,"static unsigned char %1024s = {",name) == 1)
       version=11;
-    else if (sscanf(buffer,"static char %1024s = {",name) == 1)
+    else if (MagickSscanf(buffer,"static char %1024s = {",name) == 1)
       version=11;
     else
       {
@@ -344,15 +347,15 @@ static Image *ReadXBMImage(const ImageInfo *image_info,ExceptionInfo *exception)
   if (((image->columns % 16) != 0) && ((image->columns % 16) < 9) &&
       (version == 10))
     padding=1;
-  bytes_per_line=(unsigned int) (image->columns+7)/8+padding;
-  length=(unsigned int) image->rows;
-  data=(unsigned char *) AcquireQuantumMemory(length,bytes_per_line*
-    sizeof(*data));
+  bytes_per_line=(image->columns+7)/8+padding;
+  if (HeapOverflowSanityCheckGetSize(bytes_per_line,image->rows,&length) != MagickFalse)
+    ThrowReaderException(CorruptImageError,"ImproperImageHeader");
+  data=(unsigned char *) AcquireQuantumMemory(length,sizeof(*data));
   if (data == (unsigned char *) NULL)
     ThrowReaderException(ResourceLimitError,"MemoryAllocationFailed");
   p=data;
   if (version == 10)
-    for (i=0; i < (ssize_t) (bytes_per_line*image->rows); (i+=2))
+    for (i=0; i < (ssize_t) length; i+=2)
     {
       c=XBMInteger(image,hex_digits);
       if (c < 0)
@@ -365,7 +368,7 @@ static Image *ReadXBMImage(const ImageInfo *image_info,ExceptionInfo *exception)
         *p++=(unsigned char) (c >> 8);
     }
   else
-    for (i=0; i < (ssize_t) (bytes_per_line*image->rows); i++)
+    for (i=0; i < (ssize_t) length; i++)
     {
       c=XBMInteger(image,hex_digits);
       if (c < 0)
@@ -400,7 +403,7 @@ static Image *ReadXBMImage(const ImageInfo *image_info,ExceptionInfo *exception)
       byte>>=1;
       if (bit == 8)
         bit=0;
-      q+=GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncAuthenticPixels(image,exception) == MagickFalse)
       break;
@@ -552,10 +555,10 @@ static MagickBooleanType WriteXBMImage(const ImageInfo *image_info,Image *image,
     Write X bitmap header.
   */
   GetPathComponent(image->filename,BasePath,basename);
-  (void) FormatLocaleString(buffer,MagickPathExtent,"#define %s_width %.20g\n",
+  (void) FormatLocaleString(buffer,MagickPathExtent,"#define %s_width %.17g\n",
     basename,(double) image->columns);
   (void) WriteBlob(image,strlen(buffer),(unsigned char *) buffer);
-  (void) FormatLocaleString(buffer,MagickPathExtent,"#define %s_height %.20g\n",
+  (void) FormatLocaleString(buffer,MagickPathExtent,"#define %s_height %.17g\n",
     basename,(double) image->rows);
   (void) WriteBlob(image,strlen(buffer),(unsigned char *) buffer);
   (void) FormatLocaleString(buffer,MagickPathExtent,
@@ -603,7 +606,7 @@ static MagickBooleanType WriteXBMImage(const ImageInfo *image_info,Image *image,
           bit=0;
           byte=0;
         }
-      p+=GetPixelChannels(image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (bit != 0)
       {

@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -258,7 +258,7 @@ static Image *ReadFPXImage(const ImageInfo *image_info,ExceptionInfo *exception)
     {
       FPXRelinquishSummaryInfo(&summary_info);
       FPX_ClearSystem();
-      ThrowReaderException(CorruptImageError,"ImageTypeNotSupported");
+      ThrowReaderException(ImageError,"ImageTypeNotSupported");
     }
   option=GetImageOption(image_info,"fpx:view");
   if (option == (const char *) NULL)
@@ -475,8 +475,8 @@ static Image *ReadFPXImage(const ImageInfo *image_info,ExceptionInfo *exception)
       SetPixelAlpha(image,OpaqueAlpha,q);
       if (image->alpha_trait != UndefinedPixelTrait)
         SetPixelAlpha(image,ScaleCharToQuantum(*a),q);
-      q+=GetPixelChannels(image);
-      r+=red_component->columnStride;
+      q+=(ptrdiff_t) GetPixelChannels(image);
+      r+=(ptrdiff_t) red_component->columnStride;
       g+=green_component->columnStride;
       b+=blue_component->columnStride;
       a+=alpha_component->columnStride;

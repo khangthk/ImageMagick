@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -238,6 +238,8 @@ static Image *ReadTGAImage(const ImageInfo *image_info,ExceptionInfo *exception)
   */
   image->columns=tga_info.width;
   image->rows=tga_info.height;
+  image->page.x=(ssize_t) tga_info.x_origin;
+  image->page.y=(ssize_t) tga_info.y_origin;
   if ((tga_info.image_type != TGAMonochrome) &&
       (tga_info.image_type != TGARLEMonochrome))
     {
@@ -451,7 +453,7 @@ static Image *ReadTGAImage(const ImageInfo *image_info,ExceptionInfo *exception)
     if (q == (Quantum *) NULL)
       break;
     if (flip_x != MagickFalse)
-      q+=GetPixelChannels(image)*(image->columns-1);
+      q+=(ptrdiff_t) GetPixelChannels(image)*(image->columns-1);
     for (x=0; x < (ssize_t) image->columns; x++)
     {
       if ((tga_info.image_type == TGARLEColormap) ||
@@ -586,7 +588,7 @@ static Image *ReadTGAImage(const ImageInfo *image_info,ExceptionInfo *exception)
       if (flip_x != MagickFalse)
         q-=GetPixelChannels(image);
       else
-        q+=GetPixelChannels(image);
+        q+=(ptrdiff_t) GetPixelChannels(image);
     }
     offset+=offset_stepsize;
     if (offset >= (ssize_t) image->rows)
@@ -880,7 +882,11 @@ static MagickBooleanType WriteTGAImage(const ImageInfo *image_info,Image *image,
   tga_info.colormap_length=0;
   tga_info.colormap_size=0;
   tga_info.x_origin=0;
+  if ((image->page.x > 0) && (image->page.x <= MAGICK_USHORT_MAX))
+    tga_info.x_origin=(unsigned short) image->page.x;
   tga_info.y_origin=0;
+  if ((image->page.y > 0) && (image->page.y <= MAGICK_USHORT_MAX))
+    tga_info.y_origin=(unsigned short) image->page.y;
   tga_info.width=(unsigned short) image->columns;
   tga_info.height=(unsigned short) image->rows;
   tga_info.bits_per_pixel=8;
@@ -996,8 +1002,8 @@ static MagickBooleanType WriteTGAImage(const ImageInfo *image_info,Image *image,
             *q++=((unsigned char) ScaleQuantumToAny(ClampToQuantum(
               image->colormap[i].blue),range)) | ((green & 0x07) << 5);
             *q++=(((image->alpha_trait != UndefinedPixelTrait) && ((double)
-              ClampToQuantum(image->colormap[i].alpha) > midpoint)) ? 0x80 : 0) |
-              ((unsigned char) ScaleQuantumToAny(ClampToQuantum(
+              ClampToQuantum(image->colormap[i].alpha) > midpoint)) ?
+              0x80 : 0) | ((unsigned char) ScaleQuantumToAny(ClampToQuantum(
               image->colormap[i].red),range) << 2) | ((green & 0x18) >> 3);
           }
         else
@@ -1066,7 +1072,7 @@ static MagickBooleanType WriteTGAImage(const ImageInfo *image_info,Image *image,
           if (i < 3)
             {
               count+=i;
-              p+=(i*(ssize_t) channels);
+              p+=(ptrdiff_t) (i*(ssize_t) channels);
             }
           if ((i >= 3) || (count == 128) ||
               ((x + i) == (ssize_t) image->columns))
@@ -1087,7 +1093,7 @@ static MagickBooleanType WriteTGAImage(const ImageInfo *image_info,Image *image,
             {
               (void) WriteBlobByte(image,(unsigned char) ((i-1) | 0x80));
               WriteTGAPixel(image,tga_info.image_type,p,range,midpoint);
-              p+=(i*(ssize_t) channels);
+              p+=(ptrdiff_t) (i*(ssize_t) channels);
             }
           x+=i;
         }
@@ -1096,7 +1102,7 @@ static MagickBooleanType WriteTGAImage(const ImageInfo *image_info,Image *image,
       for (x=0; x < (ssize_t) image->columns; x++)
       {
         WriteTGAPixel(image,tga_info.image_type,p,range,midpoint);
-        p+=channels;
+        p+=(ptrdiff_t) channels;
       }
      if (((unsigned char) (tga_info.attributes & 0xc0) >> 6) == 2)
        offset+=2;
@@ -1116,7 +1122,7 @@ static MagickBooleanType WriteTGAImage(const ImageInfo *image_info,Image *image,
       }
   }
   /*
-     Optional footer.
+    Optional footer.
   */
   option=GetImageOption(image_info,"tga:write-footer");
   if (IsStringTrue(option) != MagickFalse)

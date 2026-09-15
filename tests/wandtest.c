@@ -29,7 +29,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -5232,23 +5232,23 @@ int main(int argc,char **argv)
         if (path[strlen(path)-1] != '/')
           (void) ConcatenateMagickString(path,"/",MagickPathExtent);
       }
-    (void) strcat(path,"sequence.miff");
+    (void) ConcatenateMagickString(path,"sequence.miff",MagickPathExtent);
     status=MagickReadImage(magick_wand,path);
   }
   if (status == MagickFalse)
     ThrowAPIException(magick_wand);
   if (MagickGetNumberImages(magick_wand) != 5)
-    (void) FormatLocaleFile(stderr,"read %.20g images; expected 5\n",
+    (void) FormatLocaleFile(stderr,"read %.17g images; expected 5\n",
       (double) MagickGetNumberImages(magick_wand));
   (void) FormatLocaleFile(stdout,"Iterate forward...\n");
   MagickResetIterator(magick_wand);
   while (MagickNextImage(magick_wand) != MagickFalse)
-    (void) FormatLocaleFile(stdout,"index %.20g scene %.20g\n",(double)
+    (void) FormatLocaleFile(stdout,"index %.17g scene %.17g\n",(double)
       MagickGetIteratorIndex(magick_wand),(double)
       MagickGetImageScene(magick_wand));
   (void) FormatLocaleFile(stdout,"Iterate reverse...\n");
   while (MagickPreviousImage(magick_wand) != MagickFalse)
-    (void) FormatLocaleFile(stdout,"index %.20g scene %.20g\n",(double)
+    (void) FormatLocaleFile(stdout,"index %.17g scene %.17g\n",(double)
       MagickGetIteratorIndex(magick_wand),(double)
       MagickGetImageScene(magick_wand));
   (void) FormatLocaleFile(stdout,"Remove scene 1...\n");
@@ -5259,7 +5259,7 @@ int main(int argc,char **argv)
     ThrowAPIException(magick_wand);
   MagickResetIterator(magick_wand);
   while (MagickNextImage(magick_wand) != MagickFalse)
-    (void) FormatLocaleFile(stdout,"index %.20g scene %.20g\n",(double)
+    (void) FormatLocaleFile(stdout,"index %.17g scene %.17g\n",(double)
       MagickGetIteratorIndex(magick_wand),(double)
       MagickGetImageScene(magick_wand));
   (void) FormatLocaleFile(stdout,"Insert scene 1 back in sequence...\n");
@@ -5269,7 +5269,7 @@ int main(int argc,char **argv)
     ThrowAPIException(magick_wand);
   MagickResetIterator(magick_wand);
   while (MagickNextImage(magick_wand) != MagickFalse)
-    (void) FormatLocaleFile(stdout,"index %.20g scene %.20g\n",(double)
+    (void) FormatLocaleFile(stdout,"index %.17g scene %.17g\n",(double)
       MagickGetIteratorIndex(magick_wand),(double)
       MagickGetImageScene(magick_wand));
   (void) FormatLocaleFile(stdout,"Set scene 2 to scene 1...\n");
@@ -5280,7 +5280,7 @@ int main(int argc,char **argv)
     ThrowAPIException(magick_wand);
   MagickResetIterator(magick_wand);
   while (MagickNextImage(magick_wand) != MagickFalse)
-    (void) FormatLocaleFile(stdout,"index %.20g scene %.20g\n",(double)
+    (void) FormatLocaleFile(stdout,"index %.17g scene %.17g\n",(double)
       MagickGetIteratorIndex(magick_wand),(double)
       MagickGetImageScene(magick_wand));
   (void) FormatLocaleFile(stdout,"Apply image processing options...\n");

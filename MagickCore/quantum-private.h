@@ -5,7 +5,7 @@
   You may not use this file except in compliance with the License.  You may
   obtain a copy of the License at
 
-    https://imagemagick.org/script/license.php
+    https://imagemagick.org/license/
 
   Unless required by applicable law or agreed to in writing, software
   distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,14 +18,19 @@
 #ifndef MAGICKCORE_QUANTUM_PRIVATE_H
 #define MAGICKCORE_QUANTUM_PRIVATE_H
 
+#include <stddef.h>
 #include "MagickCore/memory_.h"
 #include "MagickCore/cache.h"
 #include "MagickCore/image-private.h"
 #include "MagickCore/pixel-accessor.h"
+#include "MagickCore/statistic-private.h"
 
 #if defined(__cplusplus) || defined(c_plusplus)
 extern "C" {
 #endif
+
+#define MagickMax(x,y)  (((x) > (y)) ? (x) : (y))
+#define MagickMin(x,y)  (((x) < (y)) ? (x) : (y))
 
 typedef struct _QuantumState
 {
@@ -86,7 +91,13 @@ struct _QuantumInfo
 
   size_t
     signature;
+
+  size_t
+    meta_channel;
 };
+
+extern MagickExport MagickBooleanType
+  SetQuantumExtent(const Image *,QuantumInfo *);
 
 extern MagickPrivate void
   ResetQuantumState(QuantumInfo *);
@@ -105,6 +116,15 @@ static inline MagickSizeType GetQuantumRange(const size_t depth)
   max_depth=8*sizeof(MagickSizeType);
   return((MagickSizeType) ((one << (MagickMin(depth,max_depth)-1))+
     ((one << (MagickMin(depth,max_depth)-1))-1)));
+}
+
+static inline EndianType GetHostEndian(void)
+{
+  unsigned long
+    lsb_first;
+
+  lsb_first=1;
+  return((*(char *) &lsb_first) == 1 ? LSBEndian : MSBEndian);
 }
 
 static inline float HalfToSinglePrecision(const unsigned short half)
@@ -316,10 +336,10 @@ static inline Quantum ScaleAnyToQuantum(const QuantumAny quantum,
     return(QuantumRange);
 #if !defined(MAGICKCORE_HDRI_SUPPORT)
   return((Quantum) ((double) QuantumRange*(quantum*
-    PerceptibleReciprocal((double) range))+0.5));
+    MagickSafeReciprocal((double) range))+0.5));
 #else
-  return((Quantum) ((double) QuantumRange*(quantum*
-    PerceptibleReciprocal((double) range))));
+  return((Quantum) ((double) QuantumRange*((double) quantum*
+    MagickSafeReciprocal((double) range))));
 #endif
 }
 
@@ -331,9 +351,9 @@ static inline QuantumAny ScaleQuantumToAny(const Quantum quantum,
 #else
   if ((IsNaN(quantum) != 0) || (quantum <= 0.0f))
     return((QuantumAny) 0UL);
-  if ((range*(double) quantum/(double) QuantumRange) >= 18446744073709551615.0)
+  if (((double) range*(double) quantum/(double) QuantumRange) >= 18446744073709551615.0)
     return((QuantumAny) MagickULLConstant(18446744073709551615));
-  return((QuantumAny) (range*(double) quantum/(double) QuantumRange+0.5));
+  return((QuantumAny) ((double) range*(double) quantum/(double) QuantumRange+0.5));
 #endif
 }
 
@@ -458,7 +478,7 @@ static inline Quantum ScaleLongLongToQuantum(const MagickSizeType value)
 #if !defined(MAGICKCORE_HDRI_SUPPORT)
   return((Quantum) ((value)/MagickULLConstant(281479271743489)));
 #else
-  return((Quantum) (value/281479271743489.0));
+  return((Quantum) ((double) value/281479271743489.0));
 #endif
 }
 
@@ -697,7 +717,7 @@ static inline Quantum ScaleShortToQuantum(const unsigned short value)
 }
 #endif
 
-static inline unsigned short SinglePrecisionToHalf(const float value)
+static inline unsigned short SinglePrecisionToHalf(const double value)
 {
   typedef union _SinglePrecision
   {
@@ -728,7 +748,7 @@ static inline unsigned short SinglePrecisionToHalf(const float value)
       Exponent width: 5 bits
       Significand precision: 11 (10 explicitly stored)
   */
-  map.single_precision=value;
+  map.single_precision=(float) value;
   sign_bit=(map.fixed_point >> 16) & 0x00008000;
   exponent=(int) ((map.fixed_point >> ExponentShift) & 0x000000ff)-ExponentBias;
   significand=map.fixed_point & 0x007fffff;

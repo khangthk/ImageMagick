@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -181,8 +181,10 @@ WandExport MagickBooleanType IdentifyImageCommand(ImageInfo *image_info,
 }
 #define ThrowIdentifyException(asperity,tag,option) \
 { \
-  (void) ThrowMagickException(exception,GetMagickModule(),asperity,tag,"`%s'", \
-    option); \
+  char *message = GetExceptionMessage(errno);     \
+  (void) ThrowMagickException(exception,GetMagickModule(),asperity,tag, \
+    "`%s'",option == (char *) NULL ? message : option); \
+  message=DestroyString(message); \
   DestroyIdentify(); \
   return(MagickFalse); \
 }
@@ -263,7 +265,7 @@ WandExport MagickBooleanType IdentifyImageCommand(ImageInfo *image_info,
   status=ExpandFilenames(&argc,&argv);
   if (status == MagickFalse)
     ThrowIdentifyException(ResourceLimitError,"MemoryAllocationFailed",
-      GetExceptionMessage(errno));
+      (char *) NULL);
   image_info->ping=MagickTrue;
   for (i=1; i < (ssize_t) argc; i++)
   {
@@ -303,7 +305,7 @@ WandExport MagickBooleanType IdentifyImageCommand(ImageInfo *image_info,
         identify_info=CloneImageInfo(image_info);
         identify_info->verbose=MagickFalse;
         filename=argv[i];
-        if ((LocaleCompare(filename,"--") == 0) && (i < (ssize_t) (argc-1)))
+        if ((LocaleCompare(filename,"--") == 0) && (i < ((ssize_t) argc-1)))
           filename=argv[++i];
         if (identify_info->ping != MagickFalse)
           images=PingImages(identify_info,filename,exception);
@@ -334,7 +336,7 @@ WandExport MagickBooleanType IdentifyImageCommand(ImageInfo *image_info,
               text=InterpretImageProperties(image_info,image,format,exception);
               if (text == (char *) NULL)
                 ThrowIdentifyException(ResourceLimitError,
-                  "MemoryAllocationFailed",GetExceptionMessage(errno));
+                  "MemoryAllocationFailed",(char *) NULL);
               (void) ConcatenateString(&(*metadata),text);
               text=DestroyString(text);
             }
@@ -504,6 +506,8 @@ WandExport MagickBooleanType IdentifyImageCommand(ImageInfo *image_info,
                   ThrowIdentifyException(OptionError,"NoSuchOption",argv[i]);
                 break;
               }
+            if (LocaleNCompare("identify:locate",argv[i],15) == 0)
+              image_info->ping=MagickFalse;
             break;
           }
         if (LocaleCompare("density",option+1) == 0)

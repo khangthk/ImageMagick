@@ -1,12 +1,12 @@
 /*
   Copyright @ 1999 ImageMagick Studio LLC, a non-profit organization
   dedicated to making software imaging solutions freely available.
-  
+
   You may not use this file except in compliance with the License.  You may
   obtain a copy of the License at
-  
-    https://imagemagick.org/script/license.php
-  
+
+    https://imagemagick.org/license/
+
   Unless required by applicable law or agreed to in writing, software
   distributed under the License is distributed on an "AS IS" BASIS,
   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -22,6 +22,9 @@
 extern "C" {
 #endif
 
+#include "MagickCore/resource-private.h"
+#include "MagickCore/utility-private.h"
+
 #if MAGICKCORE_ZERO_CONFIGURATION_SUPPORT
 /*
   Zero configuration security policy.  Discussion @
@@ -32,6 +35,9 @@ static const char
 "<policymap> \
 </policymap>";
 #endif
+
+extern MagickExport MagickBooleanType
+  IsPathAuthorized(const PolicyRights,const char *);
 
 extern MagickPrivate MagickBooleanType
   PolicyComponentGenesis(void);

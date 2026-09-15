@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -265,9 +265,8 @@ MagickExport void Ascii85Initialize(Image *image)
     Allocate image structure.
   */
   if (image->ascii85 == (Ascii85Info *) NULL)
-    image->ascii85=(Ascii85Info *) AcquireMagickMemory(sizeof(*image->ascii85));
-  if (image->ascii85 == (Ascii85Info *) NULL)
-    ThrowFatalException(ResourceLimitFatalError,"MemoryAllocationFailed");
+    image->ascii85=(Ascii85Info *) AcquireCriticalMemory(
+      sizeof(*image->ascii85));
   (void) memset(image->ascii85,0,sizeof(*image->ascii85));
   image->ascii85->line_break=(ssize_t) (MaxLineExtent << 1);
   image->ascii85->offset=0;
@@ -327,10 +326,10 @@ MagickExport void Ascii85Encode(Image *image,const unsigned char code)
         }
       (void) WriteBlobByte(image,(unsigned char) *q);
     }
-    p+=8;
+    p+=(ptrdiff_t) 8;
   }
   image->ascii85->offset=n;
-  p-=4;
+  p-=(ptrdiff_t)4;
   for (n=0; n < 4; n++)
     image->ascii85->buffer[n]=(*p++);
 }
@@ -615,7 +614,7 @@ MagickExport MagickBooleanType HuffmanDecodeImage(Image *image,
       index=(Quantum) (*p++);
       SetPixelIndex(image,index,q);
       SetPixelViaPixelInfo(image,image->colormap+(ssize_t) index,q);
-      q+=GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncCacheViewAuthenticPixels(image_view,exception) == MagickFalse)
       break;
@@ -788,7 +787,7 @@ RestoreMSCWarning \
     {
       *q++=(unsigned char) (GetPixelIntensity(huffman_image,p) >=
         ((double) QuantumRange/2.0) ? 0 : 1);
-      p+=GetPixelChannels(huffman_image);
+      p+=(ptrdiff_t) GetPixelChannels(huffman_image);
     }
     /*
       Huffman encode scanline.

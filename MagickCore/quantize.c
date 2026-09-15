@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -215,7 +215,7 @@
 #define CacheShift  3
 #endif
 #define ErrorQueueLength  16
-#define ErrorRelativeWeight  PerceptibleReciprocal(16)
+#define ErrorRelativeWeight  MagickSafeReciprocal(16)
 #define MaxQNodes  266817
 #define MaxTreeDepth  8
 #define QNodesInAList  1920
@@ -622,7 +622,7 @@ static MagickBooleanType AssignImageColors(Image *image,QCubeInfo *cube_info,
                   SetPixelAlpha(image,ClampToQuantum(
                     image->colormap[index].alpha),q);
               }
-            q+=GetPixelChannels(image);
+            q+=(ptrdiff_t) GetPixelChannels(image);
           }
         }
         if (SyncCacheViewAuthenticPixels(image_view,exception) == MagickFalse)
@@ -905,7 +905,7 @@ static MagickBooleanType ClassifyImageColors(QCubeInfo *cube_info,
       else
         node_info->total_color.alpha+=count*QuantumScale*(double)
           ClampPixel((double) OpaqueAlpha);
-      p+=count*(ssize_t) GetPixelChannels(image);
+      p+=(ptrdiff_t) count*(ssize_t) GetPixelChannels(image);
     }
     if (cube_info->colors > cube_info->maximum_colors)
       {
@@ -1017,7 +1017,7 @@ static MagickBooleanType ClassifyImageColors(QCubeInfo *cube_info,
       else
         node_info->total_color.alpha+=count*QuantumScale*(double)
           ClampPixel((MagickRealType) OpaqueAlpha);
-      p+=count*(ssize_t) GetPixelChannels(image);
+      p+=(ptrdiff_t) count*(ssize_t) GetPixelChannels(image);
     }
     proceed=SetImageProgress(image,ClassifyImageTag,(MagickOffsetType) y,
       image->rows);
@@ -1277,7 +1277,7 @@ static void DefineImageColormap(Image *image,QCubeInfo *cube_info,
       */
       q=image->colormap+image->colors;
       alpha=(double) ((MagickOffsetType) node_info->number_unique);
-      alpha=PerceptibleReciprocal(alpha);
+      alpha=MagickSafeReciprocal(alpha);
       if (cube_info->associate_alpha == MagickFalse)
         {
           q->red=(double) ClampToQuantum(alpha*(double) QuantumRange*
@@ -1311,7 +1311,7 @@ static void DefineImageColormap(Image *image,QCubeInfo *cube_info,
                 gamma;
 
               gamma=(double) (QuantumScale*q->alpha);
-              gamma=PerceptibleReciprocal(gamma);
+              gamma=MagickSafeReciprocal(gamma);
               q->red=(double) ClampToQuantum(alpha*gamma*(double) QuantumRange*
                 node_info->total_color.red);
               q->green=(double) ClampToQuantum(alpha*gamma*(double)
@@ -2108,7 +2108,7 @@ static QCubeInfo *GetQCubeInfo(const QuantizeInfo *quantize_info,
   weight=1.0;
   for (i=0; i < ErrorQueueLength; i++)
   {
-    cube_info->weights[i]=PerceptibleReciprocal(weight);
+    cube_info->weights[i]=MagickSafeReciprocal(weight);
     weight*=exp(log(1.0/ErrorRelativeWeight)/(ErrorQueueLength-1.0));
   }
   cube_info->diffusion=1.0;
@@ -2292,7 +2292,7 @@ MagickExport MagickBooleanType GetImageQuantizeError(Image *image,
       mean_error+=distance*distance;
       if (distance > maximum_error)
         maximum_error=distance;
-      p+=GetPixelChannels(image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
     }
   }
   image_view=DestroyCacheView(image_view);
@@ -2318,7 +2318,7 @@ MagickExport MagickBooleanType GetImageQuantizeError(Image *image,
 %
 %  The format of the GetQuantizeInfo method is:
 %
-%      GetQuantizeInfo(QuantizeInfo *quantize_info)
+%      void GetQuantizeInfo(QuantizeInfo *quantize_info)
 %
 %  A description of each parameter follows:
 %
@@ -2708,7 +2708,7 @@ MagickExport MagickBooleanType KmeansImage(Image *image,
         kmeans_pixels[id][k].count++;
         kmeans_pixels[id][k].distortion+=min_distance;
         SetPixelIndex(image,(Quantum) k,q);
-        q+=GetPixelChannels(image);
+        q+=(ptrdiff_t) GetPixelChannels(image);
       }
       if (SyncCacheViewAuthenticPixels(image_view,exception) == MagickFalse)
         status=MagickFalse;
@@ -2745,7 +2745,7 @@ MagickExport MagickBooleanType KmeansImage(Image *image,
       double
         gamma;
 
-      gamma=PerceptibleReciprocal((double) kmeans_pixels[0][j].count);
+      gamma=MagickSafeReciprocal((double) kmeans_pixels[0][j].count);
       image->colormap[j].red=gamma*(double) QuantumRange*
         kmeans_pixels[0][j].red;
       image->colormap[j].green=gamma*(double) QuantumRange*
@@ -2763,7 +2763,7 @@ MagickExport MagickBooleanType KmeansImage(Image *image,
     }
     if (image->debug != MagickFalse)
       (void) LogMagickEvent(ImageEvent,GetMagickModule(),
-        "distortion[%.20g]: %*g %*g\n",(double) n,GetMagickPrecision(),
+        "distortion[%.17g]: %*g %*g\n",(double) n,GetMagickPrecision(),
         distortion,GetMagickPrecision(),fabs(distortion-previous_tolerance));
     if (fabs(distortion-previous_tolerance) <= tolerance)
       break;
@@ -2784,7 +2784,7 @@ MagickExport MagickBooleanType KmeansImage(Image *image,
     for (n=0; n < (ssize_t) image->colors; n++)
     {
       GetColorTuple(image->colormap+n,MagickTrue,tuple);
-      (void) FormatLocaleFile(stderr,"%s %.20g\n",tuple,(double)
+      (void) FormatLocaleFile(stderr,"%s %.17g\n",tuple,(double)
         image->colormap[n].count);
     }
   dominant_image=CloneImage(image,0,0,MagickTrue,exception);
@@ -2854,7 +2854,7 @@ static inline double MagickRound(double x)
 static inline Quantum PosterizePixel(const Quantum pixel,const size_t levels)
 {
   double posterize_pixel = QuantumRange*MagickRound(QuantumScale*(double) pixel*
-    (levels-1.0))/MagickMax(levels-1.0,1.0);
+    ((double) levels-1.0))/MagickMax((double) levels-1.0,1.0);
   return(ClampToQuantum((MagickRealType) posterize_pixel));
 }
 
@@ -2901,7 +2901,7 @@ MagickExport MagickBooleanType PosterizeImage(Image *image,const size_t levels,
         if ((traits & UpdatePixelTrait) != 0)
           channels++;
       }
-      number_columns=(size_t) pow(levels,channels);
+      number_columns=(size_t) pow((double) levels,(double) channels);
       map_image=CloneImage(image,number_columns,1,MagickTrue,exception);
       if (map_image == (Image *) NULL)
         {
@@ -2918,7 +2918,7 @@ MagickExport MagickBooleanType PosterizeImage(Image *image,const size_t levels,
           *map_image_view;
 
         MagickRealType
-          scale = QuantumRange/(levels-1.0);
+          scale = (MagickRealType) QuantumRange/(levels-1.0);
 
         Quantum
           *magick_restrict q;
@@ -2949,11 +2949,11 @@ MagickExport MagickBooleanType PosterizeImage(Image *image,const size_t levels,
             if ((traits & UpdatePixelTrait) != 0)
               {
                 size_t value = remainder % levels;
-                SetPixelChannel(map_image,channel,scale*value,q);
+                SetPixelChannel(map_image,channel,(const Quantum) (scale*value),q);
                 remainder=(remainder-value)/levels;
               }
           }
-          q+=GetPixelChannels(map_image);
+          q+=(ptrdiff_t) GetPixelChannels(map_image);
         }
         if (SyncCacheViewAuthenticPixels(map_image_view,exception) == MagickFalse)
           {
@@ -2995,17 +2995,17 @@ MagickExport MagickBooleanType PosterizeImage(Image *image,const size_t levels,
               Posterize colormap.
             */
             if ((GetPixelRedTraits(image) & UpdatePixelTrait) != 0)
-              image->colormap[i].red=(double)
-                PosterizePixel(image->colormap[i].red,levels);
+              image->colormap[i].red=(MagickRealType)
+                PosterizePixel((const Quantum) image->colormap[i].red,levels);
             if ((GetPixelGreenTraits(image) & UpdatePixelTrait) != 0)
-              image->colormap[i].green=(double)
-                PosterizePixel(image->colormap[i].green,levels);
+              image->colormap[i].green=(MagickRealType)
+                PosterizePixel((const Quantum) image->colormap[i].green,levels);
             if ((GetPixelBlueTraits(image) & UpdatePixelTrait) != 0)
-              image->colormap[i].blue=(double)
-                PosterizePixel(image->colormap[i].blue,levels);
+              image->colormap[i].blue=(MagickRealType)
+                PosterizePixel((const Quantum) image->colormap[i].blue,levels);
             if ((GetPixelAlphaTraits(image) & UpdatePixelTrait) != 0)
-              image->colormap[i].alpha=(double)
-                PosterizePixel(image->colormap[i].alpha,levels);
+              image->colormap[i].alpha=(MagickRealType)
+                PosterizePixel((const Quantum) image->colormap[i].alpha,levels);
           }
         }
       /*
@@ -3047,7 +3047,7 @@ MagickExport MagickBooleanType PosterizeImage(Image *image,const size_t levels,
               continue;
             SetPixelChannel(image,channel,PosterizePixel(q[i],levels),q);
           }
-          q+=GetPixelChannels(image);
+          q+=(ptrdiff_t) GetPixelChannels(image);
         }
         if (SyncCacheViewAuthenticPixels(image_view,exception) == MagickFalse)
           status=MagickFalse;
@@ -3998,7 +3998,7 @@ static MagickBooleanType SetGrayscaleImage(Image *image,
                }
             }
           SetPixelIndex(image,(Quantum) colormap_index[intensity],q);
-          q+=GetPixelChannels(image);
+          q+=(ptrdiff_t) GetPixelChannels(image);
         }
         if (SyncCacheViewAuthenticPixels(image_view,exception) == MagickFalse)
           status=MagickFalse;
@@ -4057,7 +4057,7 @@ static MagickBooleanType SetGrayscaleImage(Image *image,
     {
       SetPixelIndex(image,(Quantum) colormap_index[ScaleQuantumToMap(
         GetPixelIndex(image,q))],q);
-      q+=GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncCacheViewAuthenticPixels(image_view,exception) == MagickFalse)
       status=MagickFalse;

@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -177,7 +177,7 @@ MagickExport Image *AutoOrientImage(const Image *image,
 %
 %  The format of the ChopImage method is:
 %
-%      Image *ChopImage(const Image *image,const RectangleInfo *chop_info)
+%      Image *ChopImage(const Image *image,const RectangleInfo *chop_info,
 %        ExceptionInfo *exception)
 %
 %  A description of each parameter follows:
@@ -298,9 +298,9 @@ MagickExport Image *ChopImage(const Image *image,const RectangleInfo *chop_info,
               continue;
             SetPixelChannel(chop_image,channel,p[i],q);
           }
-          q+=GetPixelChannels(chop_image);
+          q+=(ptrdiff_t) GetPixelChannels(chop_image);
         }
-      p+=GetPixelChannels(image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncCacheViewAuthenticPixels(chop_view,exception) == MagickFalse)
       status=MagickFalse;
@@ -364,9 +364,9 @@ MagickExport Image *ChopImage(const Image *image,const RectangleInfo *chop_info,
               continue;
             SetPixelChannel(chop_image,channel,p[i],q);
           }
-          q+=GetPixelChannels(chop_image);
+          q+=(ptrdiff_t) GetPixelChannels(chop_image);
         }
-      p+=GetPixelChannels(image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncCacheViewAuthenticPixels(chop_view,exception) == MagickFalse)
       status=MagickFalse;
@@ -492,8 +492,8 @@ MagickExport Image *ConsolidateCMYKImages(const Image *images,
             case 3: SetPixelBlack(cmyk_image,pixel,q);  break;
             default: break;
           }
-          p+=GetPixelChannels(images);
-          q+=GetPixelChannels(cmyk_image);
+          p+=(ptrdiff_t) GetPixelChannels(images);
+          q+=(ptrdiff_t) GetPixelChannels(cmyk_image);
         }
         if (SyncCacheViewAuthenticPixels(cmyk_view,exception) == MagickFalse)
           break;
@@ -597,7 +597,7 @@ MagickExport Image *CropImage(const Image *image,const RectangleInfo *geometry,
         Crop is not within virtual canvas, return 1 pixel transparent image.
       */
       (void) ThrowMagickException(exception,GetMagickModule(),OptionWarning,
-        "GeometryDoesNotContainImage","(\"%.20gx%.20g%+.20g%+.20g\") `%s'",
+        "GeometryDoesNotContainImage","(\"%.17gx%.17g%+.20g%+.20g\") `%s'",
         (double) geometry->width,(double) geometry->height,
         (double) geometry->x,(double) geometry->y,image->filename);
       crop_image=CloneImage(image,1,1,MagickTrue,exception);
@@ -615,24 +615,25 @@ MagickExport Image *CropImage(const Image *image,const RectangleInfo *geometry,
     }
   if ((page.x < 0) && (bounding_box.x >= 0))
     {
-      page.width=(size_t) ((ssize_t) page.width+page.x-bounding_box.x);
+      page.width=CastDoubleToSizeT((double) page.width+page.x-bounding_box.x);
       page.x=0;
     }
   else
     {
-      page.width=(size_t) ((ssize_t) page.width-(bounding_box.x-page.x));
+      page.width=CastDoubleToSizeT((double) page.width-(bounding_box.x-page.x));
       page.x-=bounding_box.x;
       if (page.x < 0)
         page.x=0;
     }
   if ((page.y < 0) && (bounding_box.y >= 0))
     {
-      page.height=(size_t) ((ssize_t) page.height+page.y-bounding_box.y);
+      page.height=CastDoubleToSizeT((double) page.height+page.y-bounding_box.y);
       page.y=0;
     }
   else
     {
-      page.height=(size_t) ((ssize_t) page.height-(bounding_box.y-page.y));
+      page.height=CastDoubleToSizeT((double) page.height-(bounding_box.y-
+        page.y));
       page.y-=bounding_box.y;
       if (page.y < 0)
         page.y=0;
@@ -642,7 +643,7 @@ MagickExport Image *CropImage(const Image *image,const RectangleInfo *geometry,
   if ((geometry->width != 0) && (page.width > geometry->width))
     page.width=geometry->width;
   if ((page.y+(ssize_t) page.height) > (ssize_t) image->rows)
-    page.height=(size_t) ((ssize_t) image->rows-page.y);
+    page.height=CastDoubleToSizeT((double) image->rows-page.y);
   if ((geometry->height != 0) && (page.height > geometry->height))
     page.height=geometry->height;
   bounding_box.x+=page.x;
@@ -719,8 +720,8 @@ MagickExport Image *CropImage(const Image *image,const RectangleInfo *geometry,
           continue;
         SetPixelChannel(crop_image,channel,p[i],q);
       }
-      p+=GetPixelChannels(image);
-      q+=GetPixelChannels(crop_image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(crop_image);
     }
     if (SyncCacheViewAuthenticPixels(crop_view,exception) == MagickFalse)
       status=MagickFalse;
@@ -741,6 +742,18 @@ MagickExport Image *CropImage(const Image *image,const RectangleInfo *geometry,
   crop_view=DestroyCacheView(crop_view);
   image_view=DestroyCacheView(image_view);
   crop_image->type=image->type;
+  if (status != MagickFalse)
+    {
+      char
+        transform[MagickPathExtent];
+
+      (void) FormatLocaleString(transform,MagickPathExtent,
+        "crop %.17gx%.17g %.17gx%.17g%+.20g%+.20g",
+        (double) image->columns,(double) image->rows,(double) page.width,
+        (double) page.height,(double) page.x,(double) page.y);
+      AppendImageProfileProperty(crop_image,"hdrgm","hdrgm:Transform",
+        transform,exception);
+    }
   if (status == MagickFalse)
     crop_image=DestroyImage(crop_image);
   return(crop_image);
@@ -780,8 +793,8 @@ static inline ssize_t PixelRoundOffset(double x)
     Round the fraction to nearest integer.
   */
   if ((x-floor(x)) < (ceil(x)-x))
-    return(CastDoubleToLong(floor(x)));
-  return(CastDoubleToLong(ceil(x)));
+    return(CastDoubleToSsizeT(floor(x)));
+  return(CastDoubleToSsizeT(ceil(x)));
 }
 
 MagickExport Image *CropImageToTiles(const Image *image,
@@ -968,7 +981,7 @@ MagickExport Image *CropImageToTiles(const Image *image,
 %                                                                             %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %
-%  ExcerptImage() returns a excerpt of the image as defined by the geometry.
+%  ExcerptImage() returns an excerpt of the image as defined by the geometry.
 %
 %  The format of the ExcerptImage method is:
 %
@@ -1068,8 +1081,8 @@ MagickExport Image *ExcerptImage(const Image *image,
           continue;
         SetPixelChannel(excerpt_image,channel,p[i],q);
       }
-      p+=GetPixelChannels(image);
-      q+=GetPixelChannels(excerpt_image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(excerpt_image);
     }
     if (SyncCacheViewAuthenticPixels(excerpt_view,exception) == MagickFalse)
       status=MagickFalse;
@@ -1261,14 +1274,14 @@ MagickExport Image *FlipImage(const Image *image,ExceptionInfo *exception)
       {
         PixelChannel channel = GetPixelChannelChannel(image,i);
         PixelTrait traits = GetPixelChannelTraits(image,channel);
-        PixelTrait flip_traits=GetPixelChannelTraits(flip_image,channel);
+        PixelTrait flip_traits = GetPixelChannelTraits(flip_image,channel);
         if ((traits == UndefinedPixelTrait) ||
             (flip_traits == UndefinedPixelTrait))
           continue;
         SetPixelChannel(flip_image,channel,p[i],q);
       }
-      p+=GetPixelChannels(image);
-      q+=GetPixelChannels(flip_image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(flip_image);
     }
     if (SyncCacheViewAuthenticPixels(flip_view,exception) == MagickFalse)
       status=MagickFalse;
@@ -1292,6 +1305,16 @@ MagickExport Image *FlipImage(const Image *image,ExceptionInfo *exception)
   if (page.height != 0)
     page.y=((ssize_t) page.height-(ssize_t) flip_image->rows-page.y);
   flip_image->page=page;
+  if (status != MagickFalse)
+    {
+      char
+        transform[MagickPathExtent];
+
+      (void) FormatLocaleString(transform,MagickPathExtent,
+        "flip %.17gx%.17g",(double) image->columns,(double) image->rows);
+      AppendImageProfileProperty(flip_image,"hdrgm","hdrgm:Transform",
+        transform,exception);
+    }
   if (status == MagickFalse)
     flip_image=DestroyImage(flip_image);
   return(flip_image);
@@ -1387,7 +1410,7 @@ MagickExport Image *FlopImage(const Image *image,ExceptionInfo *exception)
         status=MagickFalse;
         continue;
       }
-    q+=GetPixelChannels(flop_image)*flop_image->columns;
+    q+=(ptrdiff_t) GetPixelChannels(flop_image)*flop_image->columns;
     for (x=0; x < (ssize_t) flop_image->columns; x++)
     {
       ssize_t
@@ -1404,7 +1427,7 @@ MagickExport Image *FlopImage(const Image *image,ExceptionInfo *exception)
           continue;
         SetPixelChannel(flop_image,channel,p[i],q);
       }
-      p+=GetPixelChannels(image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncCacheViewAuthenticPixels(flop_view,exception) == MagickFalse)
       status=MagickFalse;
@@ -1428,6 +1451,16 @@ MagickExport Image *FlopImage(const Image *image,ExceptionInfo *exception)
   if (page.width != 0)
     page.x=((ssize_t) page.width-(ssize_t) flop_image->columns-page.x);
   flop_image->page=page;
+  if (status != MagickFalse)
+    {
+      char
+        transform[MagickPathExtent];
+
+      (void) FormatLocaleString(transform,MagickPathExtent,
+        "flop %.17gx%.17g",(double) image->columns,(double) image->rows);
+      AppendImageProfileProperty(flop_image,"hdrgm","hdrgm:Transform",
+        transform,exception);
+    }
   if (status == MagickFalse)
     flop_image=DestroyImage(flop_image);
   return(flop_image);
@@ -1527,8 +1560,8 @@ static MagickBooleanType CopyImageRegion(Image *destination,const Image *source,
           continue;
         SetPixelChannel(destination,channel,p[i],q);
       }
-      p+=GetPixelChannels(source);
-      q+=GetPixelChannels(destination);
+      p+=(ptrdiff_t) GetPixelChannels(source);
+      q+=(ptrdiff_t) GetPixelChannels(destination);
     }
     sync=SyncCacheViewAuthenticPixels(destination_view,exception);
     if (sync == MagickFalse)
@@ -1853,11 +1886,11 @@ MagickExport Image *SpliceImage(const Image *image,
       SetPixelGreen(splice_image,GetPixelGreen(image,p),q);
       SetPixelBlue(splice_image,GetPixelBlue(image,p),q);
       SetPixelAlpha(splice_image,GetPixelAlpha(image,p),q);
-      p+=GetPixelChannels(image);
-      q+=GetPixelChannels(splice_image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(splice_image);
     }
     for ( ; x < (splice_geometry.x+(ssize_t) splice_geometry.width); x++)
-      q+=GetPixelChannels(splice_image);
+      q+=(ptrdiff_t) GetPixelChannels(splice_image);
     for ( ; x < (ssize_t) splice_image->columns; x++)
     {
       ssize_t
@@ -1877,8 +1910,8 @@ MagickExport Image *SpliceImage(const Image *image,
       SetPixelGreen(splice_image,GetPixelGreen(image,p),q);
       SetPixelBlue(splice_image,GetPixelBlue(image,p),q);
       SetPixelAlpha(splice_image,GetPixelAlpha(image,p),q);
-      p+=GetPixelChannels(image);
-      q+=GetPixelChannels(splice_image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(splice_image);
     }
     if (SyncCacheViewAuthenticPixels(splice_view,exception) == MagickFalse)
       status=MagickFalse;
@@ -1944,11 +1977,11 @@ MagickExport Image *SpliceImage(const Image *image,
       SetPixelGreen(splice_image,GetPixelGreen(image,p),q);
       SetPixelBlue(splice_image,GetPixelBlue(image,p),q);
       SetPixelAlpha(splice_image,GetPixelAlpha(image,p),q);
-      p+=GetPixelChannels(image);
-      q+=GetPixelChannels(splice_image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(splice_image);
     }
     for ( ; x < (splice_geometry.x+(ssize_t) splice_geometry.width); x++)
-      q+=GetPixelChannels(splice_image);
+      q+=(ptrdiff_t) GetPixelChannels(splice_image);
     for ( ; x < (ssize_t) splice_image->columns; x++)
     {
       ssize_t
@@ -1968,8 +2001,8 @@ MagickExport Image *SpliceImage(const Image *image,
       SetPixelGreen(splice_image,GetPixelGreen(image,p),q);
       SetPixelBlue(splice_image,GetPixelBlue(image,p),q);
       SetPixelAlpha(splice_image,GetPixelAlpha(image,p),q);
-      p+=GetPixelChannels(image);
-      q+=GetPixelChannels(splice_image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(splice_image);
     }
     if (SyncCacheViewAuthenticPixels(splice_view,exception) == MagickFalse)
       status=MagickFalse;
@@ -2075,11 +2108,13 @@ MagickPrivate MagickBooleanType TransformImage(Image **image,
         }
       *image=transform_image;
     }
-  if (image_geometry == (const char *) NULL)
-    return(MagickTrue);
+  if (transform_image == (Image *) NULL)
+    return(MagickFalse);
   /*
     Scale image to a user specified size.
   */
+  if (image_geometry == (const char *) NULL)
+    return(MagickTrue);
   (void) ParseRegionGeometry(transform_image,image_geometry,&geometry,
     exception);
   if ((transform_image->columns == geometry.width) &&
@@ -2202,8 +2237,8 @@ MagickExport Image *TransposeImage(const Image *image,ExceptionInfo *exception)
           continue;
         SetPixelChannel(transpose_image,channel,p[i],q);
       }
-      p+=GetPixelChannels(image);
-      q+=GetPixelChannels(transpose_image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(transpose_image);
     }
     if (SyncCacheViewAuthenticPixels(transpose_view,exception) == MagickFalse)
       status=MagickFalse;
@@ -2228,6 +2263,17 @@ MagickExport Image *TransposeImage(const Image *image,ExceptionInfo *exception)
   Swap(page.width,page.height);
   Swap(page.x,page.y);
   transpose_image->page=page;
+  if (status != MagickFalse)
+    {
+      char
+        transform[MagickPathExtent];
+
+      (void) FormatLocaleString(transform,MagickPathExtent,
+        "transpose %.17gx%.17g",(double) image->columns,
+        (double) image->rows);
+      AppendImageProfileProperty(transpose_image,"hdrgm","hdrgm:Transform",
+        transform,exception);
+    }
   if (status == MagickFalse)
     transpose_image=DestroyImage(transpose_image);
   return(transpose_image);
@@ -2326,7 +2372,7 @@ MagickExport Image *TransverseImage(const Image *image,ExceptionInfo *exception)
         status=MagickFalse;
         continue;
       }
-    q+=GetPixelChannels(transverse_image)*image->columns;
+    q+=(ptrdiff_t) GetPixelChannels(transverse_image)*image->columns;
     for (x=0; x < (ssize_t) image->columns; x++)
     {
       ssize_t
@@ -2344,7 +2390,7 @@ MagickExport Image *TransverseImage(const Image *image,ExceptionInfo *exception)
           continue;
         SetPixelChannel(transverse_image,channel,p[i],q);
       }
-      p+=GetPixelChannels(image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
     }
     sync=SyncCacheViewAuthenticPixels(transverse_view,exception);
     if (sync == MagickFalse)
@@ -2374,6 +2420,17 @@ MagickExport Image *TransverseImage(const Image *image,ExceptionInfo *exception)
   if (page.height != 0)
     page.y=(ssize_t) page.height-(ssize_t) transverse_image->rows-page.y;
   transverse_image->page=page;
+  if (status != MagickFalse)
+    {
+      char
+        transform[MagickPathExtent];
+
+      (void) FormatLocaleString(transform,MagickPathExtent,
+        "transverse %.17gx%.17g",(double) image->columns,
+        (double) image->rows);
+      AppendImageProfileProperty(transverse_image,"hdrgm","hdrgm:Transform",
+        transform,exception);
+    }
   if (status == MagickFalse)
     transverse_image=DestroyImage(transverse_image);
   return(transverse_image);
@@ -2414,8 +2471,7 @@ MagickExport Image *TrimImage(const Image *image,ExceptionInfo *exception)
     *trim_image;
 
   RectangleInfo
-    geometry,
-    page;
+    geometry;
 
   assert(image != (const Image *) NULL);
   assert(image->signature == MagickCoreSignature);
@@ -2424,87 +2480,120 @@ MagickExport Image *TrimImage(const Image *image,ExceptionInfo *exception)
   geometry=GetImageBoundingBox(image,exception);
   if ((geometry.width == 0) || (geometry.height == 0))
     {
-      Image
-        *crop_image;
-
-      crop_image=CloneImage(image,1,1,MagickTrue,exception);
-      if (crop_image == (Image *) NULL)
-        return((Image *) NULL);
-      crop_image->background_color.alpha_trait=BlendPixelTrait;
-      crop_image->background_color.alpha=(MagickRealType) TransparentAlpha;
-      (void) SetImageBackgroundColor(crop_image,exception);
-      crop_image->page=image->page;
-      crop_image->page.x=(-1);
-      crop_image->page.y=(-1);
-      return(crop_image);
+      /*
+        The image is empty: return a minimal 1x1 transparent placeholder.
+      */
+      trim_image=CloneImage(image,1,1,MagickTrue,exception);
+      if (trim_image != (Image *) NULL)
+        {
+          trim_image->background_color.alpha_trait=BlendPixelTrait;
+          trim_image->background_color.alpha=(MagickRealType) TransparentAlpha;
+          (void) SetImageBackgroundColor(trim_image,exception);
+          trim_image->page.width=image->columns;
+          trim_image->page.height=image->rows;
+          trim_image->page.x=(-1);
+          trim_image->page.y=(-1);
+        }
+      return(trim_image);
     }
-  page=geometry;
   artifact=GetImageArtifact(image,"trim:minSize");
   if (artifact != (const char *) NULL)
-    (void) ParseAbsoluteGeometry(artifact,&page);
-  if ((geometry.width < page.width) && (geometry.height < page.height))
     {
+      RectangleInfo
+        minSize;
+
       /*
-        Limit trim to a minimum size.
+        Ensure trim is not less than min size dimensions relative to gravity.
       */
-      switch (image->gravity)
-      {
-        case CenterGravity:
+      minSize=geometry;
+      (void) ParseAbsoluteGeometry(artifact,&minSize);
+      if ((geometry.width < minSize.width) ||
+          (geometry.height < minSize.height))
         {
-          geometry.x-=((ssize_t) page.width-(ssize_t) geometry.width)/2;
-          geometry.y-=((ssize_t) page.height-(ssize_t) geometry.height)/2;
-          break;
+          minSize.x=(geometry.width < minSize.width) ? (ssize_t)
+            (minSize.width-geometry.width) : 0;
+          minSize.y=(geometry.height < minSize.height) ? (ssize_t)
+            (minSize.height-geometry.height) : 0;
+          switch (image->gravity)
+          {
+            case NorthWestGravity:
+            {
+              geometry.x-=minSize.x;
+              geometry.y-=minSize.y;
+              break;
+            }
+            case NorthGravity:
+            {
+              geometry.x-=minSize.x/2;
+              geometry.y-=minSize.y;
+              break;
+            }
+            case NorthEastGravity:
+            {
+              geometry.y-=minSize.y;
+              break;
+            }
+            case WestGravity:
+            {
+              geometry.x-=minSize.x;
+              geometry.y-=minSize.y/2;
+              break;
+            }
+            case EastGravity:
+            {
+              geometry.y-=minSize.y/2;
+              break;
+            }
+            case SouthWestGravity:
+            {
+              geometry.x-=minSize.x;
+              break;
+            }
+            case SouthGravity:
+            {
+              geometry.x-=minSize.x/2;
+              break;
+            }
+            case CenterGravity:
+            {
+              geometry.x-=minSize.x/2;
+              geometry.y-=minSize.y/2;
+              break;
+            }
+            case UndefinedGravity:
+            case SouthEastGravity:
+            default:
+              break;
+          }
+          if (geometry.width < minSize.width)
+            geometry.width=minSize.width;
+          if (geometry.height < minSize.height)
+            geometry.height=minSize.height;
+          if (geometry.width > image->columns)
+            geometry.width=image->columns;
+          if (geometry.height > image->rows)
+            geometry.height=image->rows;
+          if (geometry.x < 0)
+            geometry.x=0;
+          if ((geometry.x+(ssize_t) geometry.width) > (ssize_t) image->columns)
+            geometry.x=(ssize_t) image->columns-(ssize_t) geometry.width;
+          if (geometry.y < 0)
+            geometry.y=0;
+          if ((geometry.y+(ssize_t) geometry.height) > (ssize_t) image->rows)
+            geometry.y=(ssize_t) image->rows-(ssize_t) geometry.height;
         }
-        case NorthWestGravity:
-        {
-          geometry.x-=((ssize_t) page.width-(ssize_t) geometry.width);
-          geometry.y-=((ssize_t) page.height-(ssize_t) geometry.height);
-          break;
-        }
-        case NorthGravity:
-        {
-          geometry.x-=((ssize_t) page.width-(ssize_t) geometry.width)/2;
-          geometry.y-=((ssize_t) page.height-(ssize_t) geometry.height);
-          break;
-        }
-        case NorthEastGravity:
-        {
-          geometry.y-=((ssize_t) page.height-(ssize_t) geometry.height);
-          break;
-        }
-        case EastGravity:
-        {
-          geometry.y-=((ssize_t) page.height-(ssize_t) geometry.height)/2;
-          break;
-        }
-        case SouthEastGravity:
-          break;
-        case SouthGravity:
-        {
-          geometry.x-=((ssize_t) page.width-(ssize_t) geometry.width)/2;
-          break;
-        }
-        case SouthWestGravity:
-        {
-          geometry.x-=((ssize_t) page.width-(ssize_t) geometry.width);
-          break;
-        }
-        case WestGravity:
-        {
-          geometry.x-=((ssize_t) page.width-(ssize_t) geometry.width);
-          geometry.y-=((ssize_t) page.height-(ssize_t) geometry.height)/2;
-          break;
-        }
-        default:
-          break;
-      }
-      geometry.width=page.width;
-      geometry.height=page.height;
     }
   geometry.x+=image->page.x;
   geometry.y+=image->page.y;
   trim_image=CropImage(image,&geometry,exception);
   if (trim_image != (Image *) NULL)
-    Update8BIMClipPath(trim_image,image->columns,image->rows,&geometry);
+    {
+      trim_image->page.width=image->columns;
+      trim_image->page.height=image->rows;
+      if (trim_image->page.x == 0)
+        trim_image->page.x=geometry.x;
+      if (trim_image->page.y == 0)
+        trim_image->page.y=geometry.y;
+    }
   return(trim_image);
 }

@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -71,20 +71,8 @@
 #endif
 
 #if defined(MAGICKCORE_WINDOWS_SUPPORT)
-#  if !defined(freelocale)
-#    define freelocale  _free_locale
-#  endif
 #  if !defined(locale_t)
 #    define locale_t _locale_t
-#  endif
-#  if !defined(strtod_l)
-#    define strtod_l  _strtod_l
-#  endif
-#  if !defined(vfprintf_l)
-#    define vfprintf_l  _vfprintf_l
-#  endif
-#  if !defined(vsnprintf_l)
-#    define vsnprintf_l  _vsnprintf_l
 #  endif
 #endif
 
@@ -273,7 +261,11 @@ static SplayTreeInfo *AcquireLocaleSplayTree(const char *filename,
 static void DestroyCLocale(void)
 {
   if (c_locale != (locale_t) NULL)
+#if defined(MAGICKCORE_WINDOWS_SUPPORT)
+    _free_locale(c_locale);
+#else
     freelocale(c_locale);
+#endif
   c_locale=(locale_t) NULL;
 }
 #endif
@@ -358,7 +350,7 @@ MagickPrivate ssize_t FormatLocaleFileList(FILE *file,
       n=(ssize_t) vfprintf(file,format,operands);
     else
 #if defined(MAGICKCORE_WINDOWS_SUPPORT)
-      n=(ssize_t) vfprintf_l(file,format,locale,operands);
+      n=(ssize_t) _vfprintf_l(file,format,locale,operands);
 #else
       n=(ssize_t) vfprintf_l(file,locale,format,operands);
 #endif
@@ -449,13 +441,19 @@ MagickPrivate ssize_t FormatLocaleStringList(char *magick_restrict string,
       n=(ssize_t) vsnprintf(string,length,format,operands);
     else
 #if defined(MAGICKCORE_WINDOWS_SUPPORT)
-      n=(ssize_t) vsnprintf_l(string,length,format,locale,operands);
+#if _MSC_VER
+  #pragma warning(push)
+  #pragma warning(disable:4996)
+#endif
+      n=(ssize_t) _vsnprintf_l(string,length,format,locale,operands);
+#if _MSC_VER
+  #pragma warning(pop)
+#endif
 #else
       n=(ssize_t) vsnprintf_l(string,length,locale,format,operands);
 #endif
   }
-#elif defined(MAGICKCORE_HAVE_VSNPRINTF)
-#if defined(MAGICKCORE_LOCALE_SUPPORT) && defined(MAGICKCORE_HAVE_USELOCALE)
+#elif defined(MAGICKCORE_LOCALE_SUPPORT) && defined(MAGICKCORE_HAVE_USELOCALE)
   {
     locale_t
       locale,
@@ -473,9 +471,6 @@ MagickPrivate ssize_t FormatLocaleStringList(char *magick_restrict string,
   }
 #else
   n=(ssize_t) vsnprintf(string,length,format,operands);
-#endif
-#else
-  n=(ssize_t) vsprintf(string,format,operands);
 #endif
   if (n < 0)
     string[length-1]='\0';
@@ -1011,7 +1006,11 @@ MagickExport double InterpretLocaleValue(const char *magick_restrict string,
       if (locale == (locale_t) NULL)
         value=strtod(string,&q);
       else
+#if defined(MAGICKCORE_WINDOWS_SUPPORT)
+        value=_strtod_l(string,&q,locale);
+#else
         value=strtod_l(string,&q,locale);
+#endif
 #else
       value=strtod(string,&q);
 #endif
@@ -1220,16 +1219,41 @@ static MagickBooleanType LoadLocaleCache(SplayTreeInfo *cache,const char *xml,
     (void) CopyMagickString(keyword,token,MagickLocaleExtent);
     if (LocaleNCompare(keyword,"<!DOCTYPE",9) == 0)
       {
+        int
+          bracket_depth = 0,
+          quote = 0;
+
         /*
-          Doctype element.
+          DOCTYPE element.
         */
-        while ((LocaleNCompare(q,"]>",2) != 0) && (*q != '\0'))
+        for ( ; *q != '\0'; q++)
         {
-          (void) GetNextToken(q,&q,extent,token);
-          while (isspace((int) ((unsigned char) *q)) != 0)
-            q++;
+          if (quote != 0)
+            {
+              if (*q == quote)
+                quote=0;
+            }
+          else
+            {
+              if ((*q == '"') || (*q == '\''))
+                quote=(*q);
+              else
+                if (*q == '[')
+                  bracket_depth++;
+                else
+                  if (*q == ']')
+                    {
+                      if (bracket_depth > 0)
+                        bracket_depth--;
+                    }
+                  else
+                    if ((*q == '>') && (bracket_depth == 0))
+                      {
+                        q++;   /* consume final '>' */
+                        break;
+                      }
+            }
         }
-        continue;
       }
     if (LocaleNCompare(keyword,"<!--",4) == 0)
       {

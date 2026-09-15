@@ -5,7 +5,7 @@
   You may not use this file except in compliance with the License.  You may
   obtain a copy of the License at
 
-    https://imagemagick.org/script/license.php
+    https://imagemagick.org/license/
 
   Unless required by applicable law or agreed to in writing, software
   distributed under the License is distributed on an "AS IS" BASIS,
@@ -98,7 +98,6 @@ static const char
   *convert_options[] =
   {
     "",
-    "-affine 1,0,0.785,1,0,0 -transform",
     "-alpha set",
     "-black-threshold 20%",
     "-blur 0x0.5",
@@ -135,6 +134,7 @@ static const char
     "-depth 16",
     "-depth 32",
     "-despeckle",
+    "+distort AffineProjection '1,0,0.785,1,0,0'",
     "-draw \"affine 1,0,0.785,1,0,0\"",
     "-draw \"rectangle 20,10 80,50\"",
     "-edge 0x1",
@@ -390,6 +390,7 @@ static const struct ReferenceFormats
     { "RLE", UndefinedCompression, 0.0 },
     { "SCR", UndefinedCompression, 0.0 },
     { "SCT", UndefinedCompression, 0.0 },
+    { "SF3", UndefinedCompression, 0.0 },
     { "SFW", UndefinedCompression, 0.0 },
     { "SGI", UndefinedCompression, 0.0 },
     { "SHTML", UndefinedCompression, 0.0 },
@@ -504,19 +505,19 @@ struct ReferenceTypes
 static const struct ReferenceTypes
   reference_types[] =
   {
-    { TrueColorType, 8 },
-    { TrueColorAlphaType, 8 },
+    { BilevelType, 1 },
+    { ColorSeparationType, 8 },
+    { ColorSeparationAlphaType, 8 },
     { GrayscaleType, 8 },
     { GrayscaleAlphaType, 8 },
     { PaletteType, 8 },
     { PaletteAlphaType, 8 },
     { PaletteBilevelAlphaType, 8 },
-    { BilevelType, 1 },
-    { ColorSeparationType, 8 },
-    { ColorSeparationAlphaType, 8 },
+    { TrueColorType, 8 },
     { TrueColorType, 10 },
     { TrueColorType, 12 },
     { TrueColorType, 16 },
+    { TrueColorAlphaType, 8 },
     { UndefinedType, 0 }
   };
 

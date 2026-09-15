@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -238,10 +238,10 @@ static inline Quantum ReadVIPSPixelNONE(Image *image,
             c=(unsigned char) ReadBlobLong(image);
             break;
           case VIPSBandFormatFLOAT:
-            c=(unsigned char) ReadBlobFloat(image);
+            c=CastDoubleToUChar((double) ReadBlobFloat(image));
             break;
           case VIPSBandFormatDOUBLE:
-            c=(unsigned char) ReadBlobDouble(image);
+            c=CastDoubleToUChar(ReadBlobDouble(image));
             break;
           default:
             c=0;
@@ -266,10 +266,10 @@ static inline Quantum ReadVIPSPixelNONE(Image *image,
             s=(unsigned short) ReadBlobLong(image);
             break;
           case VIPSBandFormatFLOAT:
-            s=(unsigned short) ReadBlobFloat(image);
+            s=CastDoubleToUShort((double) ReadBlobFloat(image));
             break;
           case VIPSBandFormatDOUBLE:
-            s=(unsigned short) ReadBlobDouble(image);
+            s=CastDoubleToUShort(ReadBlobDouble(image));
             break;
           default:
             s=0;
@@ -354,7 +354,7 @@ static MagickBooleanType ReadVIPSPixelsNONE(Image *image,
                 SetPixelAlpha(image,ReadVIPSPixelNONE(image,format,type),q);
               }
         }
-      q+=GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncAuthenticPixels(image,exception) == MagickFalse)
       return(MagickFalse);
@@ -709,14 +709,14 @@ static MagickBooleanType WriteVIPSImage(const ImageInfo *image_info,
   }
   if (image->units == PixelsPerCentimeterResolution)
     {
-      (void) WriteBlobFloat(image,(image->resolution.x/10));
-      (void) WriteBlobFloat(image,(image->resolution.y/10));
+      (void) WriteBlobFloat(image,(float) (image->resolution.x/10));
+      (void) WriteBlobFloat(image,(float) (image->resolution.y/10));
     }
   else
     if (image->units == PixelsPerInchResolution)
       {
-        (void) WriteBlobFloat(image,(image->resolution.x/25.4));
-        (void) WriteBlobFloat(image,(image->resolution.y/25.4));
+        (void) WriteBlobFloat(image,(float) (image->resolution.x/25.4));
+        (void) WriteBlobFloat(image,(float) (image->resolution.y/25.4));
       }
     else
       {
@@ -759,7 +759,7 @@ static MagickBooleanType WriteVIPSImage(const ImageInfo *image_info,
                 WriteVIPSPixel(image,GetPixelAlpha(image,p));
               }
         }
-      p+=GetPixelChannels(image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
     }
   }
   metadata=GetImageProperty(image,"vips:metadata",exception);

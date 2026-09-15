@@ -4,7 +4,7 @@
 # You may not use this file except in compliance with the License.
 # obtain a copy of the License at
 #
-#   https://imagemagick.org/script/license.php
+#   https://imagemagick.org/license/
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -39,7 +39,14 @@ TESTS_XFAIL_TESTS =
 
 TESTS_TESTS = \
   tests/cli-colorspace.tap \
+  tests/cli-exif.tap \
+  tests/cli-heic.tap \
+  tests/cli-pcx.tap \
   tests/cli-pipe.tap \
+  tests/cli-svg.tap \
+  tests/cli-uhdr.tap \
+  tests/cli-uhdr-encoder.tap \
+  tests/cli-uhdr-resize-filter.tap \
   tests/validate-colorspace.tap \
   tests/validate-compare.tap \
   tests/validate-composite.tap \
@@ -58,6 +65,9 @@ TESTS_TESTS = \
 TESTS_EXTRA_DIST = \
   tests/common.shi \
   tests/rose.pnm \
+  tests/cli-uhdr-iptc.jpg \
+  tests/input_svg_gradient_transform.svg \
+  tests/input_svg_inline_style.svg \
   tests/input_256c.miff \
   tests/input_bilevel.miff \
   tests/input_gray.miff \

@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -197,7 +197,7 @@ static Image *ReadWMFImage(const ImageInfo *image_info,ExceptionInfo *exception)
   file=(FILE *) NULL;
   unique_file=AcquireUniqueFileResource(filename);
   if (unique_file != -1)
-    file=fdopen(unique_file,"wb");
+    file=fdopen(unique_file,"rb+");
   if ((unique_file == -1) || (file == (FILE *) NULL))
     {
       ipa_device_close(wmf_info);
@@ -213,7 +213,8 @@ static Image *ReadWMFImage(const ImageInfo *image_info,ExceptionInfo *exception)
       wmf_api_destroy(wmf_info);
       ThrowReaderException(DelegateError,"FailedToRenderFile");
     }
-  (void) fclose(file);
+  if (fseek(file,0,SEEK_SET) != 0)
+    ThrowImageException(FileOpenError,"UnableToCreateTemporaryFile");
   wmf_api_destroy(wmf_info);
   (void) CloseBlob(image);
   image=DestroyImage(image);
@@ -221,6 +222,7 @@ static Image *ReadWMFImage(const ImageInfo *image_info,ExceptionInfo *exception)
     Read EPS image.
   */
   read_info=CloneImageInfo(image_info);
+  read_info->file=file;
   SetImageInfoBlob(read_info,(void *) NULL,0);
   (void) FormatLocaleString(read_info->filename,MagickPathExtent,"eps:%s",
     filename);
@@ -2177,17 +2179,17 @@ static double util_pointsize(wmfAPI* API, wmfFont* font, char* str, double font_
       if (strlen(str) == 1)
         {
           pointsize = (font_height *
-                       (font_height *PerceptibleReciprocal(metrics.ascent + fabs(metrics.descent))));
+                       (font_height *MagickSafeReciprocal(metrics.ascent + fabs(metrics.descent))));
           draw_info->pointsize = pointsize;
           if (GetTypeMetrics(image, draw_info, &metrics, exception) != MagickFalse)
-            pointsize *= (font_height *PerceptibleReciprocal(metrics.ascent + fabs(metrics.descent)));
+            pointsize *= (font_height *MagickSafeReciprocal(metrics.ascent + fabs(metrics.descent)));
         }
       else
         {
-          pointsize = (font_height *(font_height *PerceptibleReciprocal(metrics.height)));
+          pointsize = (font_height *(font_height *MagickSafeReciprocal(metrics.height)));
           draw_info->pointsize = pointsize;
           if (GetTypeMetrics(image, draw_info, &metrics, exception) != MagickFalse)
-            pointsize *= (font_height *PerceptibleReciprocal((double) metrics.height));
+            pointsize *= (font_height *MagickSafeReciprocal((double) metrics.height));
 
         }
 #if 0

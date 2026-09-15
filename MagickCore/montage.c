@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -606,9 +606,9 @@ MagickExport Image *MontageImageList(const ImageInfo *image_info,
             GetMontageGeometry(montage_info->tile,number_images,&x_offset,&y,
               &sans,&sans);
           height=concatenate != MagickFalse ? max_height : extract_info.height;
-          y_offset+=((ssize_t) height+(extract_info.y+(ssize_t) border_width)*2+
-            (metrics.ascent-metrics.descent+4)*(ssize_t) number_lines+
-            (montage_info->shadow != MagickFalse ? 4 : 0));
+          y_offset+=(ssize_t) ((ssize_t) height+(extract_info.y+
+            (ssize_t) border_width)*2+(metrics.ascent-metrics.descent+4)*
+            (ssize_t) number_lines+(montage_info->shadow != MagickFalse ? 4 : 0));
           if (y_offset > (ssize_t) bounds.height)
             bounds.height=(size_t) y_offset;
           max_height=0;
@@ -654,7 +654,7 @@ MagickExport Image *MontageImageList(const ImageInfo *image_info,
         &sans,&sans);
     y_offset+=(ssize_t) title_offset;
     (void) FormatLocaleString(montage->montage,MagickPathExtent,
-      "%.20gx%.20g%+.20g%+.20g",(double) ((ssize_t) extract_info.width+
+      "%.17gx%.17g%+.20g%+.20g",(double) ((ssize_t) extract_info.width+
       (extract_info.x+(ssize_t) border_width)*2),(double) ((ssize_t)
       extract_info.height+(extract_info.y+(ssize_t) border_width)*2+(double)
       ((metrics.ascent-metrics.descent+4)*number_lines+
@@ -694,7 +694,7 @@ MagickExport Image *MontageImageList(const ImageInfo *image_info,
         (void) GetTypeMetrics(image_list[0],draw_clone_info,&tile_metrics,
           exception);
         (void) FormatLocaleString(tile_geometry,MagickPathExtent,
-          "%.20gx%.20g%+.20g%+.20g",(double) montage->columns,(double)
+          "%.17gx%.17g%+.20g%+.20g",(double) montage->columns,(double)
           (tile_metrics.ascent-tile_metrics.descent),0.0,
           (double) extract_info.y+4);
         (void) CloneString(&draw_clone_info->geometry,tile_geometry);
@@ -771,7 +771,7 @@ MagickExport Image *MontageImageList(const ImageInfo *image_info,
       if (image->gravity != UndefinedGravity)
         tile_image->gravity=image->gravity;
       (void) FormatLocaleString(tile_geometry,MagickPathExtent,
-        "%.20gx%.20g+0+0",(double) image->columns,(double) image->rows);
+        "%.17gx%.17g+0+0",(double) image->columns,(double) image->rows);
       flags=ParseGravityGeometry(tile_image,tile_geometry,&geometry,exception);
       x=geometry.x+(ssize_t) border_width;
       y=geometry.y+(ssize_t) border_width;
@@ -835,14 +835,15 @@ MagickExport Image *MontageImageList(const ImageInfo *image_info,
                 Annotate composite tile with label.
               */
               (void) FormatLocaleString(tile_geometry,MagickPathExtent,
-                "%.20gx%.20g%+.20g%+.20g",(double) ((montage_info->frame ?
+                "%.17gx%.17g%+.20g%+.20g",(double) ((montage_info->frame ?
                 image->columns : width)-2*border_width),(double)
                 (metrics.ascent-metrics.descent+4)*MultilineCensus(value),
                 (double) (x_offset+(ssize_t) border_width),(double)
                 ((montage_info->frame ? y_offset+(ssize_t) height+(ssize_t)
-                border_width+4 : y_offset+(ssize_t) extract_info.height+
-                (ssize_t) border_width+
-                (montage_info->shadow != MagickFalse ? 4 : 0))+bevel_width));
+                border_width+4 : y_offset+(ssize_t)
+                (concatenate != MagickFalse ? max_height : extract_info.height)+
+                (ssize_t) border_width+(montage_info->shadow != MagickFalse ?
+                4 : 0))+bevel_width));
               (void) CloneString(&draw_info->geometry,tile_geometry);
               (void) CloneString(&draw_info->text,value);
               (void) AnnotateImage(montage,draw_info,exception);
@@ -853,9 +854,9 @@ MagickExport Image *MontageImageList(const ImageInfo *image_info,
           (((tile+1) % (ssize_t) tiles_per_row) == 0))
         {
           x_offset=extract_info.x;
-          y_offset+=((ssize_t) height+(extract_info.y+(ssize_t) border_width)*2+
-            (metrics.ascent-metrics.descent+4)*number_lines+
-            (montage_info->shadow != MagickFalse ? 4 : 0));
+          y_offset+=(ssize_t) ((ssize_t) height+(extract_info.y+
+            (ssize_t) border_width)*2+(metrics.ascent-metrics.descent+4)*
+            number_lines+(montage_info->shadow != MagickFalse ? 4 : 0));
           max_height=0;
         }
       if (images->progress_monitor != (MagickProgressMonitor) NULL)

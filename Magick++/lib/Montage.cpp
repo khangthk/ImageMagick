@@ -12,11 +12,9 @@
 #define MAGICK_PLUSPLUS_IMPLEMENTATION 1
 
 #include "Magick++/Include.h"
-#include <string>
-#include <string.h>
-
 #include "Magick++/Montage.h"
 #include "Magick++/Functions.h"
+#include <cstring>
 
 Magick::Montage::Montage(void)
   : _backgroundColor("#ffffff"),
@@ -209,7 +207,7 @@ void Magick::Montage::updateMontageInfo(MontageInfo &montageInfo_ ) const
   // gravity
   montageInfo_.gravity=_gravity;
   // pointsize
-  montageInfo_.pointsize=_pointSize;
+  montageInfo_.pointsize=(double) _pointSize;
   // shadow
   montageInfo_.shadow=static_cast<MagickBooleanType>
     (_shadow ? MagickTrue : MagickFalse);

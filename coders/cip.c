@@ -22,7 +22,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -212,15 +212,15 @@ static MagickBooleanType WriteCIPImage(const ImageInfo *image_info,Image *image,
     }
   (void) WriteBlobString(image,buffer);
   (void) FormatLocaleString(buffer,MagickPathExtent,
-    "<LocationX>%.20g</LocationX>\n",(double) image->page.x);
+    "<LocationX>%.17g</LocationX>\n",(double) image->page.x);
   (void) WriteBlobString(image,buffer);
   (void) FormatLocaleString(buffer,MagickPathExtent,
-    "<LocationY>%.20g</LocationY>\n",(double) image->page.y);
+    "<LocationY>%.17g</LocationY>\n",(double) image->page.y);
   (void) WriteBlobString(image,buffer);
-  (void) FormatLocaleString(buffer,MagickPathExtent,"<Width>%.20g</Width>\n",
+  (void) FormatLocaleString(buffer,MagickPathExtent,"<Width>%.17g</Width>\n",
     (double) (image->columns+(image->columns % 2)));
   (void) WriteBlobString(image,buffer);
-  (void) FormatLocaleString(buffer,MagickPathExtent,"<Height>%.20g</Height>\n",
+  (void) FormatLocaleString(buffer,MagickPathExtent,"<Height>%.17g</Height>\n",
     (double) image->rows);
   (void) WriteBlobString(image,buffer);
   (void) FormatLocaleString(buffer,MagickPathExtent,"<Depth>2</Depth>\n");
@@ -242,7 +242,7 @@ static MagickBooleanType WriteCIPImage(const ImageInfo *image_info,Image *image,
          (((size_t) (3*ClampToQuantum(GetPixelLuma(image,p+0*GetPixelChannels(image)))/QuantumRange) & 0x03) << 0));
       (void) FormatLocaleString(buffer,MagickPathExtent,"%02x",byte);
       (void) WriteBlobString(image,buffer);
-      p+=GetPixelChannels(image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
     }
     if ((image->columns % 4) != 0)
       {

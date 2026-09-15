@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -60,11 +60,13 @@
 #include "MagickCore/memory_.h"
 #include "MagickCore/monitor.h"
 #include "MagickCore/monitor-private.h"
+#include "MagickCore/nt-base-private.h"
 #include "MagickCore/option.h"
 #include "MagickCore/quantum-private.h"
 #include "MagickCore/resource_.h"
 #include "MagickCore/static.h"
 #include "MagickCore/string_.h"
+#include "MagickCore/string-private.h"
 #include "MagickCore/module.h"
 
 #if defined(MAGICKCORE_TIFF_DELEGATE)
@@ -215,17 +217,17 @@ static Image *ReadCALSImage(const ImageInfo *image_info,
       {
         if (LocaleNCompare(header,"rdensty:",8) == 0)
           {
-            (void) sscanf(header+8,"%lu",&density);
+            (void) MagickSscanf(header+8,"%lu",&density);
             break;
           }
         if (LocaleNCompare(header,"rpelcnt:",8) == 0)
           {
-            (void) sscanf(header+8,"%lu,%lu",&width,&height);
+            (void) MagickSscanf(header+8,"%lu,%lu",&width,&height);
             break;
           }
         if (LocaleNCompare(header,"rorient:",8) == 0)
           {
-            (void) sscanf(header+8,"%lu,%lu",&pel_path,&direction);
+            (void) MagickSscanf(header+8,"%lu,%lu",&pel_path,&direction);
             if (pel_path == 90)
               orientation=5;
             else
@@ -240,29 +242,34 @@ static Image *ReadCALSImage(const ImageInfo *image_info,
           }
         if (LocaleNCompare(header,"rtype:",6) == 0)
           {
-            (void) sscanf(header+6,"%lu",&type);
+            (void) MagickSscanf(header+6,"%lu",&type);
             break;
           }
         break;
       }
     }
   }
+  if ((width == 0) || (height == 0) || (type != 1) ||
+      (orientation == 0) || (density == 0))
+    ThrowReaderException(CorruptImageError,"ImproperImageHeader");
   /*
     Read CALS pixels.
   */
   file=(FILE *) NULL;
   unique_file=AcquireUniqueFileResource(filename);
   if (unique_file != -1)
-    file=fdopen(unique_file,"wb");
+    file=fdopen(unique_file,"rb+");
   if ((unique_file == -1) || (file == (FILE *) NULL))
     ThrowImageException(FileOpenError,"UnableToCreateTemporaryFile");
   while ((c=ReadBlobByte(image)) != EOF)
     if (fputc(c,file) != c)
       break;
-  (void) fclose(file);
+  if (fseek(file,0,SEEK_SET) != 0)
+    ThrowImageException(FileOpenError,"UnableToCreateTemporaryFile");
   (void) CloseBlob(image);
   image=DestroyImage(image);
   read_info=CloneImageInfo(image_info);
+  read_info->file=file;
   SetImageInfoBlob(read_info,(void *) NULL,0);
   (void) FormatLocaleString(read_info->filename,MagickPathExtent,"group4:%s",
     filename);
@@ -272,6 +279,7 @@ static Image *ReadCALSImage(const ImageInfo *image_info,
   (void) CloneString(&read_info->density,message);
   read_info->orientation=(OrientationType) orientation;
   image=ReadImage(read_info,exception);
+  read_info->file=(FILE *) NULL;
   if (image != (Image *) NULL)
     {
       (void) CopyMagickString(image->filename,image_info->filename,

@@ -24,7 +24,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -90,8 +90,8 @@
 #include "MagickCore/resource_.h"
 #include "MagickCore/splay-tree.h"
 #include "MagickCore/statistic.h"
-#include "MagickCore/statistic-private.h"
 #include "MagickCore/string_.h"
+#include "MagickCore/string-private.h"
 #include "MagickCore/thread-private.h"
 #include "MagickCore/threshold.h"
 #include "MagickCore/timer-private.h"
@@ -107,6 +107,16 @@
 #define InitNumOprStack 50
 #define MinValStackSize 100
 #define InitNumUserSymbols 50
+
+#if defined(MAGICKCORE_WINDOWS_SUPPORT)
+#define __j0 _j0
+#define __j1 _j1
+#else
+#define __j0 j0
+#define __j1 j1
+#endif
+
+#define SECONDS_ERR -FLT_MAX
 
 typedef long double fxFltType;
 
@@ -272,6 +282,7 @@ typedef enum {
 #if defined(MAGICKCORE_HAVE_ERF)
   fErf,
 #endif
+  fEpoch,
   fExp,
   fFloor,
   fGauss,
@@ -291,6 +302,7 @@ typedef enum {
   fLn,
   fLogtwo,
   fLog,
+  fMagickTime,
   fMax,
   fMin,
   fMod,
@@ -363,6 +375,7 @@ static const FunctionT Functions[] = {
 #if defined(MAGICKCORE_HAVE_ERF)
   {fErf,     "erf"   , 1},
 #endif
+  {fEpoch,   "epoch" , 1}, /* Special case: needs a string date from a property eg %[date:modify] */
   {fExp,     "exp"   , 1},
   {fFloor,   "floor" , 1},
   {fGauss,   "gauss" , 1},
@@ -382,6 +395,7 @@ static const FunctionT Functions[] = {
   {fLn,      "ln"    , 1},
   {fLogtwo,  "logtwo", 1},
   {fLog,     "log"   , 1},
+  {fMagickTime,"magicktime", 0},
   {fMax,     "max"   , 2},
   {fMin,     "min"   , 2},
   {fMod,     "mod"   , 2},
@@ -861,25 +875,29 @@ static ElementTypeE TypeOfOpr (int op)
   return (ElementTypeE) 0;
 }
 
-static char * SetPtrShortExp (FxInfo * pfx, char * pExp, size_t len)
+static char * SetPtrShortExp (FxInfo *pfx, char *pExp, size_t len)
 {
   #define MaxLen 20
 
   size_t slen;
-  char * p;
+  char *p;
 
   *pfx->ShortExp = '\0';
 
   if (pExp && len) {
-    slen = CopyMagickString (pfx->ShortExp, pExp, len);
-    if (slen > MaxLen) { 
-      (void) CopyMagickString (pfx->ShortExp+MaxLen, "...", 4);
+    slen = CopyMagickString(pfx->ShortExp, pExp, MagickPathExtent);
+
+    if (slen > MaxLen) {
+      (void) CopyMagickString(pfx->ShortExp + MaxLen, "...", 4);
     }
-    p = strchr (pfx->ShortExp, '\n');
-    if (p) (void) CopyMagickString (p, "...", 4);
-    p = strchr (pfx->ShortExp, '\r');
-    if (p) (void) CopyMagickString (p, "...", 4);
+
+    p = strchr(pfx->ShortExp, '\n');
+    if (p) (void) CopyMagickString(p, "...", 4);
+
+    p = strchr(pfx->ShortExp, '\r');
+    if (p) (void) CopyMagickString(p, "...", 4);
   }
+
   return pfx->ShortExp;
 }
 
@@ -1053,23 +1071,43 @@ static MagickBooleanType AllocFxRt (FxInfo * pfx, fxRtT * pfxrt)
   return MagickTrue;
 }
 
-static MagickBooleanType ExtendRPN (FxInfo * pfx)
+static MagickBooleanType ExtendRPN(FxInfo * pfx)
 {
-  pfx->numElements = (int) ceil (pfx->numElements * (1 + TableExtend));
-  pfx->Elements = (ElementT*) ResizeMagickMemory (pfx->Elements, (size_t) pfx->numElements * sizeof(ElementT));
-  if (!pfx->Elements) {
-    (void) ThrowMagickException (
-      pfx->exception, GetMagickModule(), ResourceLimitFatalError,
-      "Elements", "%i",
-      pfx->numElements);
-    return MagickFalse;
-  }
-  return MagickTrue;
+  ElementT
+    *new_elements;
+
+  int
+    element_count;
+
+  /*
+    Keep the original table and size intact unless growth succeeds.
+  */
+  element_count=(int) ceil(pfx->numElements*(1+TableExtend));
+  new_elements=(ElementT *) AcquireQuantumMemory((size_t) element_count,
+    sizeof(*new_elements));
+  if (new_elements == (ElementT *) NULL)
+    {
+      (void) ThrowMagickException(pfx->exception,GetMagickModule(),
+        ResourceLimitError,"MemoryAllocationFailed","`%s'","RPN table");
+      return(MagickFalse);
+    }
+  (void) memcpy(new_elements,pfx->Elements,(size_t) pfx->usedElements*
+    sizeof(*new_elements));
+   pfx->Elements=(ElementT *) RelinquishMagickMemory(pfx->Elements);
+   pfx->Elements=new_elements;
+   pfx->numElements=element_count;
+   if (!pfx->Elements)
+     {
+       (void) ThrowMagickException(pfx->exception,GetMagickModule(),
+         ResourceLimitFatalError,"Elements","%i",pfx->numElements);
+       return(MagickFalse);
+     }
+  return(MagickTrue);
 }
 
-static inline MagickBooleanType OprInPlace (int op)
+static inline MagickBooleanType OprInPlace(int op)
 {
-  return (op >= oAddEq && op <= oSubSub ? MagickTrue : MagickFalse);
+  return(op >= oAddEq && op <= oSubSub ? MagickTrue : MagickFalse);
 }
 
 static const char * OprStr (int oprNum)
@@ -1246,16 +1284,25 @@ static MagickBooleanType TokenMaybeUserSymbol (FxInfo * pfx)
   return MagickTrue;
 }
 
-static MagickBooleanType AddElement (FxInfo * pfx, fxFltType val, int oprNum)
+static MagickBooleanType AddElement(FxInfo * pfx,fxFltType val,int oprNum)
 {
   ElementT * pel;
 
   assert (oprNum <= rNull);
 
-  if (++pfx->usedElements >= pfx->numElements) {
-    if (!ExtendRPN (pfx)) return MagickFalse;
-  }
-
+  if (++pfx->usedElements >= pfx->numElements)
+    {
+      if (ExtendRPN(pfx) == MagickFalse)
+        {
+          pfx->usedElements--;
+          return(MagickFalse);
+        }
+    }
+  if (pfx->Elements == (ElementT *) NULL)
+    {
+      pfx->usedElements--;
+      return(MagickFalse);
+    }
   pel = &pfx->Elements[pfx->usedElements-1];
   pel->type = TypeOfOpr (oprNum);
   pel->val = val;
@@ -1285,7 +1332,7 @@ static MagickBooleanType AddAddressingElement (FxInfo * pfx, int oprNum, int Ele
   if (!AddElement (pfx, (fxFltType) 0, oprNum)) return MagickFalse;
   pel = &pfx->Elements[pfx->usedElements-1];
   pel->element_index = EleNdx;
-  if (oprNum == rGoto || oprNum == rGotoChk || oprNum == rIfZeroGoto || oprNum == rIfNotZeroGoto 
+  if (oprNum == rGoto || oprNum == rGotoChk || oprNum == rIfZeroGoto || oprNum == rIfNotZeroGoto
    || oprNum == rZerStk)
   {
     pel->do_push = MagickFalse;
@@ -1323,7 +1370,7 @@ static inline char PeekChar (FxInfo * pfx)
 static inline MagickBooleanType PeekStr (FxInfo * pfx, const char * str)
 {
   SkipSpaces (pfx);
-  
+
   return (LocaleNCompare (pfx->pex, str, strlen(str))==0 ? MagickTrue : MagickFalse);
 }
 
@@ -1463,7 +1510,7 @@ static int GetCoordQualifier (FxInfo * pfx, int op)
 
 static PixelChannel GetChannelQualifier (FxInfo * pfx, int op)
 {
-  if (op == fU || op == fV || op == fP || 
+  if (op == fU || op == fV || op == fP ||
       op == fUP || op == fVP ||
       op == fS || (op >= (int) FirstImgAttr && op <= aNull)
      )
@@ -1540,12 +1587,38 @@ static MagickBooleanType IsQualifier (FxInfo * pfx)
   return MagickFalse;
 }
 
-static ssize_t GetProperty (FxInfo * pfx, fxFltType *val)
-/* returns number of character to swallow.
-   "-1" means invalid input
-   "0" means no relevant input (don't swallow, but not an error)
+static MagickBooleanType ParseISO860(const char* text,struct tm* tp)
+{
+  int
+    year,
+    month,
+    day,
+    hour,
+    min,
+    sec;
+
+  memset(tp,0,sizeof(struct tm));
+  if (MagickSscanf(text,"%d-%d-%dT%d:%d:%d",&year,&month,&day,&hour,&min,&sec) != 6)
+    return(MagickFalse);
+  tp->tm_year=year-1900;
+  tp->tm_mon=month-1;
+  tp->tm_mday=day;
+  tp->tm_hour=hour;
+  tp->tm_min=min;
+  tp->tm_sec=sec;
+  tp->tm_isdst=-1;
+  return(MagickTrue);
+}
+
+static ssize_t GetProperty (FxInfo * pfx, fxFltType *val, fxFltType *seconds)
+/* Returns number of characters to swallow.
+   Returns "-1" means invalid input.
+   Returns "0" means no relevant input (don't swallow, but not an error).
+   If *seconds is not null, sets that from assumed date-time, or SECONDS_ERR if error.
 */
 {
+  if (seconds != NULL) *seconds = SECONDS_ERR;
+
   if (PeekStr (pfx, "%[")) {
     int level = 0;
     size_t len;
@@ -1594,16 +1667,31 @@ static ssize_t GetProperty (FxInfo * pfx, fxFltType *val)
         return -1;
       }
 
-      *val = strtold (text, &tailptr);
-      if (text == tailptr) {
-        text = DestroyString(text);
-        (void) ThrowMagickException (
-          pfx->exception, GetMagickModule(), OptionError,
-          "Property", "'%s' text '%s' is not a number at '%s'",
-          sProperty, text, SetShortExp(pfx));
-        return -1;
+      if (seconds != NULL) {
+        struct tm tp;
+        if (ParseISO860(text,&tp) == MagickFalse) {
+          (void) ThrowMagickException (
+            pfx->exception, GetMagickModule(), OptionError,
+            "Function 'epoch' expected date property, found ", "'%s' at '%s'",
+            text, SetShortExp(pfx));
+          text = DestroyString(text);
+          *seconds = SECONDS_ERR;
+          return -1;
+        }
+        *seconds = (fxFltType)mktime (&tp);
+        *val = *seconds;
+      } else {
+        *val = strtold (text, &tailptr);
+        if (text == tailptr) {
+          text = DestroyString(text);
+          (void) ThrowMagickException (
+            pfx->exception, GetMagickModule(), OptionError,
+            "Property", "'%s' text '%s' is not a number at '%s'",
+            sProperty, text, SetShortExp(pfx));
+          text = DestroyString(text);
+          return -1;
+        }
       }
-
       text = DestroyString(text);
     }
     return ((ssize_t) len);
@@ -1826,6 +1914,30 @@ static MagickBooleanType GetFunction (FxInfo * pfx, FunctionE fe)
   if (fe==fDo) {
     (void) AddAddressingElement (pfx, rGoto, NULL_ADDRESS); /* address will be ndx1+1 */
   }
+  if (fe==fEpoch) {
+    fxFltType
+      val,
+      seconds;
+    ssize_t
+      lenOptArt = GetProperty (pfx, &val, &seconds);
+    if (seconds == SECONDS_ERR) {
+      /* Exception may not have been raised. */
+      (void) ThrowMagickException (
+        pfx->exception, GetMagickModule(), OptionError,
+        "Function 'epoch' expected date property", "at '%s'",
+        SetShortExp(pfx));
+      return MagickFalse;
+    }
+    if (lenOptArt < 0) return MagickFalse;
+    if (lenOptArt > 0) {
+      (void) AddElement (pfx, seconds, oNull);
+      pfx->pex += lenOptArt;
+      if (!ExpectChar (pfx, ')')) return MagickFalse;
+      if (!PopOprOpenParen (pfx, pushOp)) return MagickFalse;
+      return MagickTrue;
+    }
+  }
+
   while (nArgs > 0) {
     int FndOne = 0;
     if (TranslateStatementList (pfx, strLimit, &chLimit)) {
@@ -1843,7 +1955,7 @@ static MagickBooleanType GetFunction (FxInfo * pfx, FunctionE fe)
       if (fe == fP || fe == fS|| fe == fIf) {
         (void) AddElement (pfx, (fxFltType) 0, oNull);
         FndOne = 1;
-      } 
+      }
     }
 
     if (strchr (strLimit, chLimit)==NULL) {
@@ -2170,12 +2282,22 @@ static MagickBooleanType GetOperand (
       }
       return MagickTrue;
     } else if (OprIsUnaryPrefix (op)) {
+      MagickBooleanType operand_ok;
       if (!PushOperatorStack (pfx, (int) op)) return MagickFalse;
       pfx->pex++;
       SkipSpaces (pfx);
       if (!*pfx->pex) return MagickFalse;
-
-      if (!GetOperand (pfx, UserSymbol, NewUserSymbol, UserSymNdx, needPopAll)) {
+      if (pfx->teDepth >= MagickMaxRecursionDepth) {
+        (void) ThrowMagickException (
+          pfx->exception, GetMagickModule(), OptionError,
+          "Expression too deeply nested", "(depth %i exceeds limit %i)",
+          pfx->teDepth, MagickMaxRecursionDepth);
+        return MagickFalse;
+      }
+      pfx->teDepth++;
+      operand_ok=GetOperand (pfx, UserSymbol, NewUserSymbol, UserSymNdx, needPopAll);
+      pfx->teDepth--;
+      if (!operand_ok) {
         (void) ThrowMagickException (
           pfx->exception, GetMagickModule(), OptionError,
           "After unary, bad operand at", "'%s'",
@@ -2251,7 +2373,7 @@ static MagickBooleanType GetOperand (
       }
 
       val = (fxFltType) 0;
-      lenOptArt = GetProperty (pfx, &val);
+      lenOptArt = GetProperty (pfx, &val, NULL);
       if (lenOptArt < 0) return MagickFalse;
       if (lenOptArt > 0) {
         (void) AddElement (pfx, val, oNull);
@@ -2518,7 +2640,7 @@ static MagickBooleanType GetOperator (
   */
 
   while (pfx->usedOprStack > 0) {
-    OperatorE top = pfx->OperatorStack[pfx->usedOprStack-1]; 
+    OperatorE top = pfx->OperatorStack[pfx->usedOprStack-1];
     int precTop, precNew;
     if (top == oOpenParen || top == oAssign || OprInPlace ((int) top)) break;
     precTop = Operators[top].precedence;
@@ -2607,6 +2729,13 @@ static MagickBooleanType TranslateExpression (
   TernaryT ternary;
   ternary.addr_query = NULL_ADDRESS;
   ternary.addr_colon = NULL_ADDRESS;
+
+  if (pfx->teDepth >= MagickMaxRecursionDepth) {
+    (void) ThrowMagickException(pfx->exception, GetMagickModule(), OptionError,
+        "Expression too deeply nested", "(depth %i exceeds limit %i)",
+        pfx->teDepth, MagickMaxRecursionDepth);
+    return MagickFalse;
+  }
 
   pfx->teDepth++;
 
@@ -2819,7 +2948,7 @@ static MagickBooleanType TranslateStatement (FxInfo * pfx, char * strLimit, char
   }
   if (pfx->usedElements && *chLimit==';') {
     /* FIXME: not necessarily the last element,
-       but the last _executed_ element, eg "goto" in a "for()"., 
+       but the last _executed_ element, eg "goto" in a "for()".,
        Pending a fix, we will use rZerStk.
     */
     ElementT * pel = &pfx->Elements[pfx->usedElements-1];
@@ -3015,11 +3144,11 @@ static inline fxFltType ImageStat (
       /* Do nothing */
       break;
     case aPrintsizeX:
-      ret = (fxFltType) PerceptibleReciprocal (pfx->Images[ImgNum]->resolution.x)
+      ret = (fxFltType) MagickSafeReciprocal (pfx->Images[ImgNum]->resolution.x)
                         * pfx->Images[ImgNum]->columns;
       break;
     case aPrintsizeY:
-      ret = (fxFltType) PerceptibleReciprocal (pfx->Images[ImgNum]->resolution.y)
+      ret = (fxFltType) MagickSafeReciprocal (pfx->Images[ImgNum]->resolution.y)
                         * pfx->Images[ImgNum]->rows;
       break;
     case aQuality:
@@ -3174,7 +3303,7 @@ static inline fxFltType GetIntensity (FxInfo * pfx, ssize_t ImgNum, const fxFltT
 
   (void) GetPixelInfo (img, &pixelinf);
 
-  if (!InterpolatePixelInfo (img, pfx->Imgs[pfx->ImgNum].View, img->interpolate,
+  if (!InterpolatePixelInfo (img, pfx->Imgs[ImgNum].View, img->interpolate,
               (double) fx, (double) fy, &pixelinf, pfx->exception))
   {
     (void) ThrowMagickException (
@@ -3284,7 +3413,7 @@ static MagickBooleanType ExecuteRPN (FxInfo * pfx, fxRtT * pfxrt, fxFltType *res
           regA = (pfxrt->UserSymVals[pel->element_index] *= regA);
           break;
         case oDivideEq:
-          regA = (pfxrt->UserSymVals[pel->element_index] *= PerceptibleReciprocal((double)regA));
+          regA = (pfxrt->UserSymVals[pel->element_index] /= regA);
           break;
         case oPlusPlus:
           regA = pfxrt->UserSymVals[pel->element_index]++;
@@ -3302,7 +3431,7 @@ static MagickBooleanType ExecuteRPN (FxInfo * pfx, fxRtT * pfxrt, fxFltType *res
           regA *= regB;
           break;
         case oDivide:
-          regA *= PerceptibleReciprocal((double)regB);
+          regA /= regB;
           break;
         case oModulus:
           regA = fmod ((double) regA, fabs(floor((double) regB+0.5)));
@@ -3314,24 +3443,24 @@ static MagickBooleanType ExecuteRPN (FxInfo * pfx, fxRtT * pfxrt, fxFltType *res
           regA = -regA;
           break;
         case oLshift:
-          if ((size_t) (regB+0.5) >= (8*sizeof(size_t)))
+          if (CastDoubleToSizeT((double) regB+0.5) >= (8*sizeof(size_t)))
             {
               (void) ThrowMagickException ( pfx->exception, GetMagickModule(),
                 OptionError, "undefined shift", "%g", (double) regB);
               regA = (fxFltType) 0.0;
               break;
             }
-          regA = (fxFltType) ((size_t)(regA+0.5) << (size_t)(regB+0.5));
+          regA = (fxFltType) (CastDoubleToSizeT((double) regA+0.5) << CastDoubleToSizeT((double) regB+0.5));
           break;
         case oRshift:
-          if ((size_t) (regB+0.5) >= (8*sizeof(size_t)))
+          if (CastDoubleToSizeT((double) regB+0.5) >= (8*sizeof(size_t)))
             {
               (void) ThrowMagickException ( pfx->exception, GetMagickModule(),
                 OptionError, "undefined shift", "%g", (double) regB);
               regA = (fxFltType) 0.0;
               break;
             }
-          regA = (fxFltType) ((size_t)(regA+0.5) >> (size_t)(regB+0.5));
+          regA = (fxFltType) (CastDoubleToSizeT((double) regA+0.5) >> CastDoubleToSizeT((double) regB+0.5));
           break;
         case oEq:
           regA = fabs((double) (regA-regB)) < MagickEpsilon ? 1.0 : 0.0;
@@ -3361,15 +3490,21 @@ static MagickBooleanType ExecuteRPN (FxInfo * pfx, fxRtT * pfxrt, fxFltType *res
           regA = (regA==0) ? 1.0 : 0.0;
           break;
         case oBitAnd:
-          regA = (fxFltType) ((size_t)(regA+0.5) & (size_t)(regB+0.5));
+          regA = (fxFltType) (CastDoubleToSizeT((double) regA+0.5) & CastDoubleToSizeT((double) regB+0.5));
           break;
         case oBitOr:
-          regA = (fxFltType) ((size_t)(regA+0.5) | (size_t)(regB+0.5));
+          regA = (fxFltType) (CastDoubleToSizeT((double) regA+0.5) | CastDoubleToSizeT((double) regB+0.5));
           break;
         case oBitNot:
-          /* Old fx doesn't add 0.5. */
-          regA = (fxFltType) (~(size_t)(regA+0.5));
-          break;
+          {
+            size_t
+              new_value;
+
+            /* Old fx doesn't add 0.5. */
+            new_value=~CastDoubleToSizeT((double) regA+0.5);
+            regA=(fxFltType) new_value;
+            break;
+          }
         case oPow:
           regA = pow ((double) regA, (double) regB);
           break;
@@ -3419,7 +3554,7 @@ static MagickBooleanType ExecuteRPN (FxInfo * pfx, fxRtT * pfxrt, fxFltType *res
         case fAiry:
           if (regA==0) regA = 1.0;
           else {
-            fxFltType gamma = 2.0 * j1 ((MagickPI*regA)) / (MagickPI*regA);
+            fxFltType gamma = 2.0 * __j1((double) (MagickPI*regA)) / (MagickPI*regA);
             regA = gamma * gamma;
           }
           break;
@@ -3485,6 +3620,9 @@ static MagickBooleanType ExecuteRPN (FxInfo * pfx, fxRtT * pfxrt, fxFltType *res
           regA = erf ((double) regA);
           break;
 #endif
+        case fEpoch:
+          /* Do nothing. */
+          break;
         case fExp:
           regA = exp ((double) regA);
           break;
@@ -3495,7 +3633,7 @@ static MagickBooleanType ExecuteRPN (FxInfo * pfx, fxRtT * pfxrt, fxFltType *res
           regA = exp((double) (-regA*regA/2.0))/sqrt(2.0*MagickPI);
           break;
         case fGcd:
-          if (!IsNaN(regA)) 
+          if (!IsNaN((double) regA))
             regA = FxGcd (regA, regB, 0);
           break;
         case fHypot:
@@ -3505,32 +3643,35 @@ static MagickBooleanType ExecuteRPN (FxInfo * pfx, fxRtT * pfxrt, fxFltType *res
           regA = floor ((double) regA);
           break;
         case fIsnan:
-          regA = (fxFltType) (!!IsNaN (regA));
+          regA = (fxFltType) (!!IsNaN ((double) regA));
           break;
 #if defined(MAGICKCORE_HAVE_J0)
         case fJ0:
-          regA = j0 ((double) regA);
+          regA = __j0((double) regA);
           break;
 #endif
 #if defined(MAGICKCORE_HAVE_J1)
         case fJ1:
-          regA = j1 ((double) regA);
+          regA = __j1((double) regA);
           break;
 #endif
 #if defined(MAGICKCORE_HAVE_J1)
         case fJinc:
           if (regA==0) regA = 1.0;
-          else regA = 2.0 * j1 ((MagickPI*regA))/(MagickPI*regA);
+          else regA = 2.0 * __j1((double) (MagickPI*regA))/(MagickPI*regA);
           break;
 #endif
         case fLn:
           regA = log ((double) regA);
           break;
         case fLogtwo:
-          regA = MagickLog10((double) regA) / log10(2.0);
+          regA = log10((double) regA) / log10(2.0);
           break;
         case fLog:
-          regA = MagickLog10 ((double) regA);
+          regA = log10 ((double) regA);
+          break;
+        case fMagickTime:
+          regA = (fxFltType) GetMagickTime();
           break;
         case fMax:
           regA = (regA > regB) ? regA : regB;
@@ -3539,7 +3680,11 @@ static MagickBooleanType ExecuteRPN (FxInfo * pfx, fxRtT * pfxrt, fxFltType *res
           regA = (regA < regB) ? regA : regB;
           break;
         case fMod:
-          regA = regA - floor((double) (regA*PerceptibleReciprocal((double) regB)))*regB;
+          if (regB == 0) {
+            regA = 0;
+          } else {
+            regA = regA - floor((double) (regA/regB))*regB;
+          }
           break;
         case fNot:
           regA = (fxFltType) (regA < MagickEpsilon);
@@ -3887,10 +4032,10 @@ static MagickBooleanType ExecuteRPN (FxInfo * pfx, fxRtT * pfxrt, fxFltType *res
         case aPrintsize:
           break;
         case aPrintsizeX:
-          regA = (fxFltType) PerceptibleReciprocal (img->resolution.x) * img->columns;
+          regA = (fxFltType) MagickSafeReciprocal (img->resolution.x) * img->columns;
           break;
         case aPrintsizeY:
-          regA = (fxFltType) PerceptibleReciprocal (img->resolution.y) * img->rows;
+          regA = (fxFltType) MagickSafeReciprocal (img->resolution.y) * img->rows;
           break;
         case aQuality:
           regA = (fxFltType) img->quality;
@@ -4024,7 +4169,7 @@ static MagickBooleanType ExecuteRPN (FxInfo * pfx, fxRtT * pfxrt, fxFltType *res
             (int)pel->operator_index, OprStr(pel->operator_index));
           break;
     }
-    if (pel->do_push) 
+    if (pel->do_push)
       if (!PushVal (pfx, pfxrt, regA, i)) break;
   }
 
@@ -4066,6 +4211,7 @@ MagickPrivate MagickBooleanType FxEvaluateChannelExpression (
   assert (pfx->fxrts != NULL);
 
   pfx->fxrts[id].thisPixel = NULL;
+
 
   if (!ExecuteRPN (pfx, &pfx->fxrts[id], &ret, channel, x, y)) {
     (void) ThrowMagickException (
@@ -4344,8 +4490,8 @@ MagickExport Image *FxImage(const Image *image,const char *expression,
 
         q[i] = ClampToQuantum ((MagickRealType) (QuantumRange*result));
       }
-      p+=GetPixelChannels (image);
-      q+=GetPixelChannels (fx_image);
+      p+=(ptrdiff_t) GetPixelChannels (image);
+      q+=(ptrdiff_t) GetPixelChannels (fx_image);
     }
     if (SyncCacheViewAuthenticPixels(fx_view, pfx->exception) == MagickFalse)
       status=MagickFalse;

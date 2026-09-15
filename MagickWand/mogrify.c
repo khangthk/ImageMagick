@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -212,11 +212,11 @@ static MagickBooleanType MonitorProgress(const char *text,
   if (p == (char *) NULL)
     (void) FormatLocaleFile(stderr,"%s: %ld of %lu, %02ld%% complete\r",
       locale_message,(long) offset,(unsigned long) extent,(long)
-      (100.0*offset*PerceptibleReciprocal(extent-1.0)));
+      (100.0*offset*MagickSafeReciprocal((double) extent-1.0)));
   else
     (void) FormatLocaleFile(stderr,"%s[%s]: %ld of %lu, %02ld%% complete\r",
       locale_message,p+1,(long) offset,(unsigned long) extent,(long)
-      (100.0*offset*PerceptibleReciprocal(extent-1.0)));
+      (100.0*offset*MagickSafeReciprocal((double) extent-1.0)));
   if (offset == (MagickOffsetType) (extent-1))
     (void) FormatLocaleFile(stderr,"\n");
   (void) fflush(stderr);
@@ -2568,8 +2568,8 @@ WandExport MagickBooleanType MogrifyImage(ImageInfo *image_info,const int argc,
             flags=ParsePageGeometry(*image,argv[i+1],&geometry,exception);
             if ((flags & PercentValue) != 0)
               {
-                geometry.x*=(double) (*image)->columns/100.0;
-                geometry.y*=(double) (*image)->rows/100.0;
+                geometry.x*=(ssize_t) ((*image)->columns/100.0);
+                geometry.y*=(ssize_t) ((*image)->rows/100.0);
               }
             mogrify_image=RollImage(*image,geometry.x,geometry.y,exception);
             break;
@@ -3728,8 +3728,10 @@ WandExport MagickBooleanType MogrifyImageCommand(ImageInfo *image_info,
 }
 #define ThrowMogrifyException(asperity,tag,option) \
 { \
-  (void) ThrowMagickException(exception,GetMagickModule(),asperity,tag,"`%s'", \
-    option); \
+  char *message = GetExceptionMessage(errno);     \
+  (void) ThrowMagickException(exception,GetMagickModule(),asperity,tag, \
+    "`%s'",option == (char *) NULL ? message : option); \
+  message=DestroyString(message); \
   DestroyMogrify(); \
   return(MagickFalse); \
 }
@@ -3814,7 +3816,7 @@ WandExport MagickBooleanType MogrifyImageCommand(ImageInfo *image_info,
   status=ExpandFilenames(&argc,&argv);
   if (status == MagickFalse)
     ThrowMogrifyException(ResourceLimitError,"MemoryAllocationFailed",
-      GetExceptionMessage(errno));
+      (char *) NULL);
   for (i=1; i < (ssize_t) argc; i++)
   {
     option=argv[i];
@@ -3853,7 +3855,7 @@ WandExport MagickBooleanType MogrifyImageCommand(ImageInfo *image_info,
         */
         FireImageStack(MagickFalse,MagickFalse,pend);
         filename=argv[i];
-        if ((LocaleCompare(filename,"--") == 0) && (i < (ssize_t) (argc-1)))
+        if ((LocaleCompare(filename,"--") == 0) && (i < ((ssize_t) argc-1)))
           filename=argv[++i];
         images=ReadImages(image_info,filename,exception);
         status&=(MagickStatusType) (images != (Image *) NULL) &&
@@ -3902,28 +3904,59 @@ WandExport MagickBooleanType MogrifyImageCommand(ImageInfo *image_info,
         if ((LocaleCompare(image->filename,"-") != 0) &&
             (IsPathWritable(image->filename) != MagickFalse))
           {
+            int
+              file = -1;
+
+            RandomInfo
+              *random_info;
+
             /*
-              Rename image file as backup.
+              Generate a temporary filename to write the new image to.
             */
+            random_info=AcquireRandomInfo();
             (void) CopyMagickString(backup_filename,image->filename,
               MagickPathExtent);
-            for (j=0; j < 6; j++)
+            for (j=0; j < TMP_MAX; j++)
             {
-              (void) ConcatenateMagickString(backup_filename,"~",
-                MagickPathExtent);
-              if (IsPathAccessible(backup_filename) == MagickFalse)
+              StringInfo
+                *key_info;
+
+              unsigned char
+                *key_bytes;
+
+              key_info=GetRandomKey(random_info,4);
+              if (key_info == (StringInfo *) NULL)
+                break;
+              key_bytes=GetStringInfoDatum(key_info);
+              (void) FormatLocaleString(backup_filename,MagickPathExtent,
+                "%s-%02x%02x%02x%02x~",image->filename,key_bytes[0],
+                key_bytes[1],key_bytes[2],key_bytes[3]);
+              key_info=DestroyStringInfo(key_info);
+              file=open_utf8(backup_filename,O_RDWR | O_CLOEXEC | O_CREAT | O_EXCL |
+                O_BINARY | O_NOFOLLOW,S_MODE);
+              if ((file >= 0) || (errno != EEXIST))
                 break;
             }
-            if ((IsPathAccessible(backup_filename) != MagickFalse) ||
-                (rename_utf8(image->filename,backup_filename) != 0))
+            random_info=DestroyRandomInfo(random_info);
+            if (file < 0)
               *backup_filename='\0';
+            else
+              file=close_utf8(file)-1;
           }
         /*
           Write transmogrified image to disk.
         */
         image_info->synchronize=MagickTrue;
-        status&=(MagickStatusType) WriteImages(image_info,image,image->filename,
-          exception);
+        {
+          Image *clone_image = CloneImageList(image,exception);
+          if (clone_image != (Image *) NULL)
+            {
+              status&=(MagickStatusType) WriteImages(image_info,clone_image,
+                (*backup_filename != '\0') ? backup_filename :
+                clone_image->filename,exception);
+              clone_image=DestroyImageList(clone_image);
+            }
+        }
         if (status != MagickFalse)
           {
             {
@@ -3936,11 +3969,14 @@ WandExport MagickBooleanType MogrifyImageCommand(ImageInfo *image_info,
                 (void) set_file_timestamp(image->filename,&properties);
             }
             if (*backup_filename != '\0')
-              (void) remove_utf8(backup_filename);
+              {
+                if (rename_utf8(backup_filename,image->filename) != 0)
+                  status=MagickFalse;
+              }
           }
         else
           if (*backup_filename != '\0')
-            (void) rename_utf8(backup_filename,image->filename);
+            (void) remove_utf8(backup_filename);
         RemoveAllImageStack();
         continue;
       }
@@ -8330,7 +8366,6 @@ WandExport MagickBooleanType MogrifyImageList(ImageInfo *image_info,
             Image
               *fx_image;
 
-puts("list");
             (void) SyncImagesSettings(mogrify_info,*images,exception);
             fx_image=FxImage(*images,argv[i+1],exception);
             if (fx_image == (Image *) NULL)

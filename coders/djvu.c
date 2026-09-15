@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -329,8 +329,7 @@ get_page_image(LoadContext *lc, ddjvu_page_t *page, int x, int y, int w, int h, 
   Image
     *image;
 
-  int
-    ret,
+  size_t
     stride;
 
   unsigned char
@@ -349,7 +348,7 @@ get_page_image(LoadContext *lc, ddjvu_page_t *page, int x, int y, int w, int h, 
         stride = (type == DDJVU_PAGETYPE_BITONAL)?
                 (image->columns + 7)/8 : image->columns *3;
 
-        q = (unsigned char *) AcquireQuantumMemory(image->rows,(size_t) stride);
+        q = (unsigned char *) AcquireQuantumMemory(image->rows,stride);
         if (q == (unsigned char *) NULL)
           return;
 
@@ -372,14 +371,13 @@ get_page_image(LoadContext *lc, ddjvu_page_t *page, int x, int y, int w, int h, 
         ddjvu_format_set_row_order(format, 1);
         ddjvu_format_set_y_direction(format, 1);
 
-        ret = ddjvu_page_render(page,
+        (void) ddjvu_page_render(page,
                                     DDJVU_RENDER_COLOR, /* ddjvu_render_mode_t */
                                     &rect,
                                     &rect,     /* mmc: ?? */
                                     format,
                                     (size_t) stride, /* ?? */
                                     (char*)q);
-        (void) ret;
         ddjvu_format_release(format);
 
 
@@ -408,7 +406,7 @@ get_page_image(LoadContext *lc, ddjvu_page_t *page, int x, int y, int w, int h, 
                                                 if (bit == 8)
                                                         bit=0;
                                                 byte>>=1;
-                                          o+=GetPixelChannels(image);
+                                          o+=(ptrdiff_t) GetPixelChannels(image);
                                         }
                                 if (SyncAuthenticPixels(image,exception) == MagickFalse)
                                         break;
@@ -442,7 +440,7 @@ get_page_image(LoadContext *lc, ddjvu_page_t *page, int x, int y, int w, int h, 
                     SetPixelRed(image,ScaleCharToQuantum(*s++),r);
                     SetPixelGreen(image,ScaleCharToQuantum(*s++),r);
                     SetPixelBlue(image,ScaleCharToQuantum(*s++),r);
-                    r+=GetPixelChannels(image);
+                    r+=(ptrdiff_t) GetPixelChannels(image);
                   }
 
                               (void) SyncAuthenticPixels(image,exception);
@@ -660,7 +658,7 @@ static Image *ReadOneDJVUImage(LoadContext* lc,const int pagenum,
                 image->depth =  8UL;    /* i only support that? */
         }
 #if DEBUG
-        printf("now filling %.20g x %.20g\n",(double) image->columns,(double)
+        printf("now filling %.17g x %.17g\n",(double) image->columns,(double)
           image->rows);
 #endif
 
@@ -690,7 +688,7 @@ static Image *ReadOneDJVUImage(LoadContext* lc,const int pagenum,
 
 
 #if DEBUG
-        printf("END: finished filling %.20g x %.20g\n",(double) image->columns,
+        printf("END: finished filling %.17g x %.17g\n",(double) image->columns,
           (double) image->rows);
 #endif
 

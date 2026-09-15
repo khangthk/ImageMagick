@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -72,6 +72,7 @@
 #include "MagickCore/option.h"
 #include "MagickCore/option-private.h"
 #include "MagickCore/pixel-accessor.h"
+#include "MagickCore/policy.h"
 #include "MagickCore/profile.h"
 #include "MagickCore/profile-private.h"
 #include "MagickCore/property.h"
@@ -137,7 +138,11 @@ typedef struct _JPEGClientInfo
     *image;
 
   MagickBooleanType
-    finished;
+    detect_uhdr,
+    finished,
+    skip_icc_profiles,
+    skip_app_profiles,
+    uhdr_metadata;
 
   StringInfo
     *profiles[MaxJPEGProfiles+1];
@@ -182,8 +187,33 @@ typedef struct _QuantizationTable
 /*
   Const declarations.
 */
+#if defined(MAGICKCORE_JPEG_DELEGATE)
+typedef enum
+{
+  JPEGGainmapSignatureAPP1 = 0x01,
+  JPEGGainmapSignatureAPP2 = 0x02
+} JPEGGainmapSignatureContext;
+
+typedef struct _JPEGGainmapSignature
+{
+  const char
+    *signature;
+
+  unsigned int
+    contexts;
+} JPEGGainmapSignature;
+
 static const char
   xmp_namespace[] = "http://ns.adobe.com/xap/1.0/";
+
+static const JPEGGainmapSignature
+  gainmap_signatures[] =
+  {
+    { "http://ns.adobe.com/hdr-gain-map/1.0/", JPEGGainmapSignatureAPP1 },
+    { "http://ns.google.com/photos/1.0/gainmap/", JPEGGainmapSignatureAPP1 },
+    { "urn:iso:std:iso:ts:21496:-1", JPEGGainmapSignatureAPP2 }
+  };
+#endif
 
 /*
   Forward declarations.
@@ -226,6 +256,212 @@ static MagickBooleanType IsJPEG(const unsigned char *magick,const size_t length)
     return(MagickTrue);
   return(MagickFalse);
 }
+
+#if defined(MAGICKCORE_JPEG_DELEGATE)
+static MagickBooleanType IsGainmapSignatureContext(
+  const JPEGGainmapSignature *gainmap_signature,
+  const JPEGGainmapSignatureContext context)
+{
+  if ((gainmap_signature->contexts & (unsigned int) context) == 0)
+    return(MagickFalse);
+  return(MagickTrue);
+}
+
+static MagickBooleanType IsJPEGProfileMatching(const unsigned char *profile,
+  const size_t length,const char *signature)
+{
+  size_t
+    i,
+    signature_length;
+
+  signature_length=strlen(signature);
+  if (length < signature_length)
+    return(MagickFalse);
+  for (i=0; i <= (length-signature_length); i++)
+    if (memcmp(profile+i,signature,signature_length) == 0)
+      return(MagickTrue);
+  return(MagickFalse);
+}
+
+static const char *GetGainmapSignatureWithPrefix(const unsigned char *profile,
+  const size_t length,const JPEGGainmapSignatureContext context)
+{
+  size_t
+    i;
+
+  for (i=0; i < (sizeof(gainmap_signatures)/sizeof(*gainmap_signatures)); i++)
+  {
+    const char
+      *signature;
+
+    size_t
+      signature_length;
+
+    if (IsGainmapSignatureContext(gainmap_signatures+i,context) == MagickFalse)
+      continue;
+    signature=gainmap_signatures[i].signature;
+    signature_length=strlen(signature);
+    if ((length <= signature_length) &&
+        (memcmp(profile,signature,length) == 0))
+      return(signature);
+  }
+  return((const char *) NULL);
+}
+
+static size_t GetMaxGainmapSignatureLength(
+  const JPEGGainmapSignatureContext context)
+{
+  size_t
+    i,
+    max_signature_length = 0;
+
+  for (i=0; i < (sizeof(gainmap_signatures)/sizeof(*gainmap_signatures)); i++)
+  {
+    size_t
+      signature_length;
+
+    if (IsGainmapSignatureContext(gainmap_signatures+i,context) == MagickFalse)
+      continue;
+    signature_length=strlen(gainmap_signatures[i].signature);
+    if (signature_length > max_signature_length)
+      max_signature_length=signature_length;
+  }
+  return(max_signature_length);
+}
+
+static MagickBooleanType IsGainmapSignatureWindowMatching(
+  const unsigned char *window,const size_t length,
+  const JPEGGainmapSignatureContext context)
+{
+  size_t
+    i;
+
+  for (i=0; i < (sizeof(gainmap_signatures)/sizeof(*gainmap_signatures)); i++)
+  {
+    const char
+      *signature;
+
+    size_t
+      signature_length;
+
+    if (IsGainmapSignatureContext(gainmap_signatures+i,context) == MagickFalse)
+      continue;
+    signature=gainmap_signatures[i].signature;
+    signature_length=strlen(signature);
+    if ((length >= signature_length) &&
+        (memcmp(window+length-signature_length,signature,signature_length) ==
+          0))
+      return(MagickTrue);
+  }
+  return(MagickFalse);
+}
+
+static MagickBooleanType IsUltraHDRJPEGProfile(const unsigned char *profile,
+  const size_t length)
+{
+  size_t
+    i;
+
+  for (i=0; i < (sizeof(gainmap_signatures)/sizeof(*gainmap_signatures)); i++)
+    if ((IsGainmapSignatureContext(gainmap_signatures+i,
+        JPEGGainmapSignatureAPP1) != MagickFalse) &&
+        (IsJPEGProfileMatching(profile,length,gainmap_signatures[i].signature) !=
+        MagickFalse))
+      return(MagickTrue);
+  return(MagickFalse);
+}
+
+static MagickBooleanType IsJPEGXMPProfile(const unsigned char *profile,
+  const size_t length)
+{
+  if (length <= strlen(xmp_namespace))
+    return(MagickFalse);
+  if (LocaleNCompare((const char *) profile,xmp_namespace,
+      strlen(xmp_namespace)-1) == 0)
+    return(MagickTrue);
+  return(MagickFalse);
+}
+
+#if defined(MAGICKCORE_UHDR_DELEGATE)
+static void SetUltraHDRCoderFilename(ImageInfo *uhdr_info,
+  const char *filename)
+{
+  if (LocaleNCompare(filename,"UHDR:",5) == 0)
+    (void) CopyMagickString(uhdr_info->filename,filename,MagickPathExtent);
+  else
+    (void) FormatLocaleString(uhdr_info->filename,MagickPathExtent,
+      "UHDR:%s",filename);
+  (void) CopyMagickString(uhdr_info->magick,"UHDR",MagickPathExtent);
+}
+
+static MagickBooleanType IsUltraHDRJPEGAutoRoutingEnabled(
+  const ImageInfo *image_info,const PolicyRights rights)
+{
+  const char
+    *option;
+
+  option=GetImageOption(image_info,"jpeg:detect-uhdr");
+  if (IsStringFalse(option) != MagickFalse)
+    return(MagickFalse);
+  if (IsRightsAuthorized(CoderPolicyDomain,rights,"UHDR") == MagickFalse)
+    return(MagickFalse);
+  if (IsRightsAuthorized(ModulePolicyDomain,rights,"UHDR") == MagickFalse)
+    return(MagickFalse);
+  return(MagickTrue);
+}
+
+static MagickBooleanType IsUltraHDRJPEGReadOptionsCompatible(
+  const ImageInfo *image_info)
+{
+  if (GetImageOption(image_info,"jpeg:size") != (const char *) NULL)
+    return(MagickFalse);
+  if (GetImageOption(image_info,"jpeg:colors") != (const char *) NULL)
+    return(MagickFalse);
+  if (GetImageOption(image_info,"jpeg:block-smoothing") != (const char *) NULL)
+    return(MagickFalse);
+  if (GetImageOption(image_info,"jpeg:dct-method") != (const char *) NULL)
+    return(MagickFalse);
+  if (GetImageOption(image_info,"jpeg:fancy-upsampling") !=
+      (const char *) NULL)
+    return(MagickFalse);
+  return(MagickTrue);
+}
+
+static Image *ReadUltraHDRJPEGImage(const ImageInfo *image_info,
+  ExceptionInfo *exception)
+{
+  Image
+    *images;
+
+  ImageInfo
+    *uhdr_info;
+
+  uhdr_info=CloneImageInfo(image_info);
+  SetUltraHDRCoderFilename(uhdr_info,image_info->filename);
+  (void) SetImageOption(uhdr_info,"jpeg:detect-uhdr","false");
+  images=ReadImage(uhdr_info,exception);
+  uhdr_info=DestroyImageInfo(uhdr_info);
+  return(images);
+}
+
+static MagickBooleanType WriteUltraHDRJPEGImage(const ImageInfo *image_info,
+  Image *image,ExceptionInfo *exception)
+{
+  ImageInfo
+    *uhdr_info;
+
+  MagickBooleanType
+    status;
+
+  uhdr_info=CloneImageInfo(image_info);
+  SetUltraHDRCoderFilename(uhdr_info,image_info->filename);
+  (void) SetImageOption(uhdr_info,"jpeg:detect-uhdr","false");
+  status=WriteImage(uhdr_info,image,exception);
+  uhdr_info=DestroyImageInfo(uhdr_info);
+  return(status);
+}
+#endif
+#endif
 
 #if defined(MAGICKCORE_JPEG_DELEGATE)
 /*
@@ -256,15 +492,20 @@ static MagickBooleanType IsJPEG(const unsigned char *magick,const size_t length)
 %
 */
 
-static inline int JPEGGetSample(const struct jpeg_decompress_struct *jpeg_info,
-  const JSAMPLE *p)
+static inline Quantum JPEGGetQuantum(const struct jpeg_decompress_struct *jpeg_info,
+  QuantumAny range,const JSAMPLE *p)
 {
-  if (jpeg_info->data_precision > 8)
-    return((int) (*(unsigned short *) p));
-  return((int) (*(JSAMPLE *) p));
+  if (jpeg_info->data_precision == 8)
+    return ScaleCharToQuantum(*p);
+  else if (jpeg_info->data_precision == 16)
+    return ScaleShortToQuantum(*(unsigned short *) p);
+  else if (jpeg_info->data_precision < 8)
+    return ScaleAnyToQuantum(*p,range);
+  else
+    return ScaleAnyToQuantum(*(unsigned short *) p,range);
 }
 
-static boolean FillInputBuffer(j_decompress_ptr compress_info)
+static boolean FillInputBuffer(const j_decompress_ptr compress_info)
 {
   SourceManager
     *source;
@@ -305,6 +546,23 @@ static void InitializeSource(j_decompress_ptr compress_info)
 
   source=(SourceManager *) compress_info->src;
   source->start_of_blob=TRUE;
+}
+
+static MagickBooleanType IsAspectRatio(const j_decompress_ptr compress_info)
+{
+  if (compress_info->density_unit != 0)
+    return(MagickFalse);
+  if ((compress_info->X_density == 1) && (compress_info->Y_density == 1))
+    return(MagickTrue);
+  if ((compress_info->X_density == 3) && (compress_info->Y_density == 2))
+    return(MagickTrue);
+  if ((compress_info->X_density == 4) && (compress_info->Y_density == 3))
+    return(MagickTrue);
+  if ((compress_info->X_density == 16) && (compress_info->Y_density == 9))
+    return(MagickTrue);
+  if ((compress_info->X_density == 16) && (compress_info->Y_density == 10))
+    return(MagickTrue);
+  return(MagickFalse);
 }
 
 static MagickBooleanType IsITUFaxImage(const Image *image)
@@ -424,8 +682,8 @@ static void JPEGWarningHandler(j_common_ptr jpeg_info,int level)
       }
 }
 
-static MagickBooleanType ReadProfilePayload(j_decompress_ptr jpeg_info,const int index,
-  const size_t length)
+static MagickBooleanType ReadProfilePayload(j_decompress_ptr jpeg_info,
+  const int index,const size_t length)
 {
   ExceptionInfo
     *exception;
@@ -481,8 +739,111 @@ static MagickBooleanType ReadProfilePayload(j_decompress_ptr jpeg_info,const int
   *p='\0';
   if (image->debug != MagickFalse)
     (void) LogMagickEvent(CoderEvent,GetMagickModule(),
-      "Profile[%.20g]: %.20g bytes",(double) index,(double) length);
+      "Profile[%.17g]: %.17g bytes",(double) index,(double) length);
   return(MagickTrue);
+}
+
+static void ThrowJPEGProfileEOFException(j_decompress_ptr jpeg_info)
+{
+  JPEGClientInfo
+    *client_info;
+
+  client_info=(JPEGClientInfo *) jpeg_info->client_data;
+  (void) ThrowMagickException(client_info->exception,GetMagickModule(),
+    CorruptImageError,"InsufficientImageDataInFile","`%s'",
+    client_info->image->filename);
+}
+
+static MagickBooleanType SkipProfilePayload(j_decompress_ptr jpeg_info,
+  const size_t length)
+{
+  if (length == 0)
+    return(MagickTrue);
+  (*jpeg_info->src->skip_input_data)(jpeg_info,(long) length);
+  if (jpeg_info->err->msg_code == JWRN_JPEG_EOF)
+    {
+      ThrowJPEGProfileEOFException(jpeg_info);
+      return(MagickFalse);
+    }
+  return(MagickTrue);
+}
+
+static MagickBooleanType ReadUltraHDRAPP1Profile(j_decompress_ptr jpeg_info,
+  const size_t length)
+{
+  char
+    xmp_signature[MagickPathExtent];
+
+  int
+    c;
+
+  JPEGClientInfo
+    *client_info;
+
+  size_t
+    i,
+    max_signature_length,
+    signature_length,
+    window_length;
+
+  unsigned char
+    window[MagickPathExtent];
+
+  client_info=(JPEGClientInfo *) jpeg_info->client_data;
+  signature_length=strlen(xmp_namespace)-1;
+  if (length <= signature_length)
+    return(SkipProfilePayload(jpeg_info,length));
+  for (i=0; i < signature_length; i++)
+  {
+    c=GetCharacter(jpeg_info);
+    if (c == EOF)
+      {
+        ThrowJPEGProfileEOFException(jpeg_info);
+        return(MagickFalse);
+      }
+    xmp_signature[i]=(char) c;
+  }
+  xmp_signature[i]='\0';
+  if (LocaleNCompare(xmp_signature,xmp_namespace,signature_length) != 0)
+    return(SkipProfilePayload(jpeg_info,length-signature_length));
+  max_signature_length=GetMaxGainmapSignatureLength(JPEGGainmapSignatureAPP1);
+  window_length=0;
+  for (i=signature_length; i < length; i++)
+  {
+    c=GetCharacter(jpeg_info);
+    if (c == EOF)
+      {
+        ThrowJPEGProfileEOFException(jpeg_info);
+        return(MagickFalse);
+      }
+    if (window_length < max_signature_length)
+      window[window_length++]=(unsigned char) c;
+    else
+      {
+        (void) memmove(window,window+1,max_signature_length-1);
+        window[max_signature_length-1]=(unsigned char) c;
+      }
+    if (IsGainmapSignatureWindowMatching(window,window_length,
+        JPEGGainmapSignatureAPP1) != MagickFalse)
+      {
+        client_info->uhdr_metadata=MagickTrue;
+        (void) SetImageArtifact(client_info->image,"jpeg:hdrgm","true");
+        return(SkipProfilePayload(jpeg_info,length-i-1));
+      }
+  }
+  return(MagickTrue);
+}
+
+static MagickBooleanType ReadSkippedAPPProfile(j_decompress_ptr jpeg_info,
+  const int marker,const size_t length)
+{
+  JPEGClientInfo
+    *client_info;
+
+  client_info=(JPEGClientInfo *) jpeg_info->client_data;
+  if ((marker == 1) && (client_info->detect_uhdr != MagickFalse))
+    return(ReadUltraHDRAPP1Profile(jpeg_info,length));
+  return(SkipProfilePayload(jpeg_info,length));
 }
 
 static boolean ReadComment(j_decompress_ptr jpeg_info)
@@ -578,40 +939,92 @@ static boolean ReadICCProfile(j_decompress_ptr jpeg_info)
   for (i=0; i < 12; i++)
     magick[i]=(char) GetCharacter(jpeg_info);
   magick[i]='\0';
+  client_info=(JPEGClientInfo *) jpeg_info->client_data;
   if (LocaleCompare(magick,ICC_PROFILE) != 0)
     {
+      const char
+        *gainmap_signature;
+
+      const size_t
+        prefix_length = 12;
+
       if (LocaleCompare(magick,"MPF") == 0)
         {
+          if (client_info->skip_icc_profiles != MagickFalse)
+            return(SkipProfilePayload(jpeg_info,length-prefix_length) !=
+              MagickFalse ? TRUE : FALSE);
           /*
             Multi-picture support (Future).
           */
-          status=ReadProfilePayload(jpeg_info,ICC_INDEX,length-12);
+          status=ReadProfilePayload(jpeg_info,ICC_INDEX,length-prefix_length);
           if (status == MagickFalse)
             return(FALSE);
-          client_info=(JPEGClientInfo *) jpeg_info->client_data;
           status=SetImageProfile(client_info->image,"MPF",
             client_info->profiles[ICC_INDEX],client_info->exception);
           client_info->profiles[ICC_INDEX]=DestroyStringInfo(
             client_info->profiles[ICC_INDEX]);
           return(TRUE);
         }
+      gainmap_signature=GetGainmapSignatureWithPrefix((const unsigned char *)
+        magick,prefix_length,JPEGGainmapSignatureAPP2);
+      if (gainmap_signature != (const char *) NULL)
+        {
+          if (client_info->detect_uhdr != MagickFalse)
+            {
+              MagickBooleanType
+                signature_match = MagickFalse;
+
+              size_t
+                signature_length;
+
+              signature_length=strlen(gainmap_signature);
+              if (length >= signature_length)
+                {
+                  signature_match=MagickTrue;
+                  for (i=(ssize_t) prefix_length;
+                       i < (ssize_t) signature_length; i++)
+                  {
+                    int
+                      c;
+
+                    c=GetCharacter(jpeg_info);
+                    if (c == EOF)
+                      {
+                        ThrowJPEGProfileEOFException(jpeg_info);
+                        return(FALSE);
+                      }
+                    if (c != (int) ((unsigned char) gainmap_signature[i]))
+                      signature_match=MagickFalse;
+                  }
+                  if (signature_match != MagickFalse)
+                    {
+                      client_info->uhdr_metadata=MagickTrue;
+                      (void) SetImageArtifact(client_info->image,"jpeg:hdrgm",
+                        "true");
+                    }
+                  return(SkipProfilePayload(jpeg_info,length-signature_length)
+                    != MagickFalse ? TRUE : FALSE);
+                }
+            }
+          return(SkipProfilePayload(jpeg_info,length-prefix_length) !=
+            MagickFalse ? TRUE : FALSE);
+        }
       /*
         Not a ICC profile, return.
       */
-      for (i=0; i < (ssize_t) (length-12); i++)
-        if (GetCharacter(jpeg_info) == EOF)
-          break;
-      return(TRUE);
+      return(SkipProfilePayload(jpeg_info,length-prefix_length) != MagickFalse ?
+        TRUE : FALSE);
     }
   (void) GetCharacter(jpeg_info);  /* id */
   (void) GetCharacter(jpeg_info);  /* markers */
   length-=14;
+  image=client_info->image;
+  exception=client_info->exception;
+  if (client_info->skip_icc_profiles != MagickFalse)
+    return(SkipProfilePayload(jpeg_info,length) != MagickFalse ? TRUE : FALSE);
   status=ReadProfilePayload(jpeg_info,ICC_INDEX,length);
   if (status == MagickFalse)
     return(FALSE);
-  client_info=(JPEGClientInfo *) jpeg_info->client_data;
-  image=client_info->image;
-  exception=client_info->exception;
   status=SetImageProfile(image,"icc",client_info->profiles[ICC_INDEX],
     exception);
   return(status == MagickFalse ? FALSE : TRUE);
@@ -733,16 +1146,26 @@ static boolean ReadAPPProfiles(j_decompress_ptr jpeg_info)
   client_info=(JPEGClientInfo *) jpeg_info->client_data;
   image=client_info->image;
   exception=client_info->exception;
+  if (client_info->skip_app_profiles != MagickFalse)
+    return(ReadSkippedAPPProfile(jpeg_info,marker,length) != MagickFalse ?
+      TRUE : FALSE);
   if (client_info->profiles[marker] != (StringInfo *) NULL)
     offset=GetStringInfoLength(client_info->profiles[marker]);
   status=ReadProfilePayload(jpeg_info,marker,length);
   if (status == MagickFalse)
     return(FALSE);
+  p=GetStringInfoDatum(client_info->profiles[marker])+offset;
+  if ((marker == 1) &&
+      (client_info->detect_uhdr != MagickFalse) &&
+      (IsJPEGXMPProfile(p,length) != MagickFalse) &&
+      (IsUltraHDRJPEGProfile(p,length) != MagickFalse))
+    {
+      client_info->uhdr_metadata=MagickTrue;
+      (void) SetImageArtifact(image,"jpeg:hdrgm","true");
+    }
   if (marker != 1)
     return(TRUE);
-  p=GetStringInfoDatum(client_info->profiles[marker])+offset;
-  if ((length > strlen(xmp_namespace)) &&
-      (LocaleNCompare((char *) p,xmp_namespace,strlen(xmp_namespace)-1) == 0))
+  if (IsJPEGXMPProfile(p,length) != MagickFalse)
     {
       size_t
         i;
@@ -770,32 +1193,13 @@ static boolean ReadAPPProfiles(j_decompress_ptr jpeg_info)
         }
     }
   else
-    if (length > 4)
-      {
-        if ((LocaleNCompare((char *) p,"exif",4) == 0) ||
-            (LocaleNCompare((char *) p,"MM",2) == 0) ||
-            (LocaleNCompare((char *) p,"II",2) == 0))
-          {
-            /*
-              Extract EXIF profile.
-            */
-            profile=AcquireProfileStringInfo("exif",length,exception);
-            if (profile != (StringInfo*) NULL)
-              {
-                (void) memcpy(GetStringInfoDatum(profile),p,length);
-                status=SetImageProfilePrivate(image,profile,exception);
-              }
-            client_info->profiles[marker]=DestroyStringInfo(
-              client_info->profiles[marker]);
-          }
-        else
-          status=SetImageProfile(image,"app1",client_info->profiles[marker],
-            exception);
-      }
-    else
+    {
       status=SetImageProfile(image,"app1",client_info->profiles[marker],
         exception);
-  return(status);
+      client_info->profiles[marker]=DestroyStringInfo(
+        client_info->profiles[marker]);
+    }
+  return(status == MagickFalse ? FALSE : TRUE);
 }
 
 static void SkipInputData(j_decompress_ptr compress_info,long number_bytes)
@@ -842,7 +1246,7 @@ static void JPEGSourceManager(j_decompress_ptr compress_info,Image *image)
   source->image=image;
 }
 
-static void JPEGSetImageQuality(struct jpeg_decompress_struct *jpeg_info,
+static void JPEGSetImageQuality(const struct jpeg_decompress_struct *jpeg_info,
   Image *image)
 {
   image->quality=UndefinedCompressionQuality;
@@ -918,7 +1322,7 @@ static void JPEGSetImageQuality(struct jpeg_decompress_struct *jpeg_info,
             image->quality=(size_t) i+1;
           if (image->debug != MagickFalse)
             (void) LogMagickEvent(CoderEvent,GetMagickModule(),
-              "Quality: %.20g (%s)",(double) i+1,(qvalue <= hash[i]) &&
+              "Quality: %.17g (%s)",(double) i+1,(qvalue <= hash[i]) &&
               (sum <= sums[i]) ? "exact" : "approximate");
           break;
         }
@@ -967,7 +1371,7 @@ static void JPEGSetImageQuality(struct jpeg_decompress_struct *jpeg_info,
               image->quality=(size_t) i+1;
             if (image->debug != MagickFalse)
               (void) LogMagickEvent(CoderEvent,GetMagickModule(),
-                "Quality: %.20g (%s)",(double) i+1,(qvalue <= hash[i]) &&
+                "Quality: %.17g (%s)",(double) i+1,(qvalue <= hash[i]) &&
                 (sum <= sums[i]) ? "exact" : "approximate");
             break;
           }
@@ -975,7 +1379,8 @@ static void JPEGSetImageQuality(struct jpeg_decompress_struct *jpeg_info,
   }
 }
 
-static void JPEGSetImageSamplingFactor(struct jpeg_decompress_struct *jpeg_info,  Image *image,ExceptionInfo *exception)
+static void JPEGSetImageSamplingFactor(const struct jpeg_decompress_struct *jpeg_info,
+  Image *image,ExceptionInfo *exception)
 {
   char
     sampling_factor[MagickPathExtent];
@@ -1105,14 +1510,15 @@ static Image *ReadOneJPEGImage(const ImageInfo *image_info,
   MemoryInfo
     *memory_info;
 
+  QuantumAny
+    range;
+
   size_t
     bytes_per_pixel,
-    max_memory_to_use,
-    units;
+    max_memory_to_use;
 
   ssize_t
     i,
-    scale,
     y;
 
   struct jpeg_error_mgr
@@ -1154,6 +1560,13 @@ static Image *ReadOneJPEGImage(const ImageInfo *image_info,
   memory_info=(MemoryInfo *) NULL;
   client_info->exception=exception;
   client_info->image=image;
+  option=GetImageOption(image_info,"profile:skip");
+  client_info->skip_icc_profiles=IsOptionMember("ICC",option) != MagickFalse ?
+    MagickTrue : MagickFalse;
+  client_info->skip_app_profiles=IsOptionMember("APP",option) != MagickFalse ?
+    MagickTrue : MagickFalse;
+  client_info->detect_uhdr=IsStringFalse(GetImageOption(image_info,
+    "jpeg:detect-uhdr")) == MagickFalse ? MagickTrue : MagickFalse;
   if (setjmp(client_info->error_recovery) != 0)
     {
       client_info=JPEGCleanup(jpeg_info,client_info);
@@ -1171,12 +1584,12 @@ static Image *ReadOneJPEGImage(const ImageInfo *image_info,
   jpeg_info->progress=(&jpeg_progress);
   JPEGSourceManager(jpeg_info,image);
   jpeg_set_marker_processor(jpeg_info,JPEG_COM,ReadComment);
-  option=GetImageOption(image_info,"profile:skip");
   for (i=1; i < MaxJPEGProfiles; i++)
   {
     if (i == ICC_INDEX)
       {
-        if (IsOptionMember("ICC",option) == MagickFalse)
+        if ((client_info->skip_icc_profiles == MagickFalse) ||
+            (client_info->detect_uhdr != MagickFalse))
           jpeg_set_marker_processor(jpeg_info,ICC_MARKER,ReadICCProfile);
       }
     else if (i == IPTC_INDEX)
@@ -1189,29 +1602,101 @@ static Image *ReadOneJPEGImage(const ImageInfo *image_info,
         /*
           Ignore APP14 as this will change the colors of the image.
         */
-        if (IsOptionMember("APP",option) == MagickFalse)
+        if ((client_info->skip_app_profiles == MagickFalse) ||
+            ((i == 1) && (client_info->detect_uhdr != MagickFalse)))
           jpeg_set_marker_processor(jpeg_info,(int) (JPEG_APP0+i),
             ReadAPPProfiles);
       }
   }
   (void) jpeg_read_header(jpeg_info,TRUE);
+#if defined(MAGICKCORE_UHDR_DELEGATE)
+  if ((client_info->uhdr_metadata != MagickFalse) && (*offset == 0) &&
+      (GetBlobStreamData(image) != (const unsigned char *) NULL) &&
+      (GetBlobSize(image) != 0) &&
+      (LocaleCompare(image_info->magick,"MPO") != 0) &&
+      (IsUltraHDRJPEGReadOptionsCompatible(image_info) != MagickFalse) &&
+      (IsUltraHDRJPEGAutoRoutingEnabled(image_info,ReadPolicyRights) !=
+        MagickFalse))
+    {
+      const char
+        *comment,
+        *sampling_factor;
+
+      const StringInfo
+        *profile;
+
+      ExceptionInfo
+        *uhdr_exception;
+
+      Image
+        *uhdr_image;
+
+      JPEGSetImageQuality(jpeg_info,image);
+      JPEGSetImageSamplingFactor(jpeg_info,image,exception);
+      if (jpeg_info->saw_JFIF_marker != 0)
+        {
+          if (jpeg_info->density_unit == 1)
+            image->units=PixelsPerInchResolution;
+          else if (jpeg_info->density_unit == 2)
+            image->units=PixelsPerCentimeterResolution;
+          if (IsAspectRatio(jpeg_info) == MagickFalse)
+            {
+              if (jpeg_info->X_density != 0)
+                image->resolution.x=(double) jpeg_info->X_density;
+              if (jpeg_info->Y_density != 0)
+                image->resolution.y=(double) jpeg_info->Y_density;
+            }
+        }
+      uhdr_exception=AcquireExceptionInfo();
+      uhdr_image=ReadUltraHDRJPEGImage(image_info,uhdr_exception);
+      if (uhdr_image != (Image *) NULL)
+        {
+          (void) SetImageArtifact(uhdr_image,"jpeg:hdrgm","true");
+          if (image->quality != UndefinedCompressionQuality)
+            uhdr_image->quality=image->quality;
+          uhdr_image->resolution=image->resolution;
+          uhdr_image->units=image->units;
+          profile=GetImageProfile(image,"iptc");
+          if (profile != (const StringInfo *) NULL)
+            (void) SetImageProfile(uhdr_image,"iptc",profile,uhdr_exception);
+          sampling_factor=GetImageProperty(image,"jpeg:sampling-factor",
+            exception);
+          if (sampling_factor != (const char *) NULL)
+            (void) SetImageProperty(uhdr_image,"jpeg:sampling-factor",
+              sampling_factor,exception);
+          comment=GetImageProperty(image,"comment",exception);
+          if (comment != (const char *) NULL)
+            (void) SetImageProperty(uhdr_image,"comment",comment,exception);
+          InheritException(exception,uhdr_exception);
+          uhdr_exception=DestroyExceptionInfo(uhdr_exception);
+          client_info=JPEGCleanup(jpeg_info,client_info);
+          (void) CloseBlob(image);
+          image=DestroyImage(image);
+          return(uhdr_image);
+        }
+      uhdr_exception=DestroyExceptionInfo(uhdr_exception);
+      (void) DeleteImageArtifact(image,"jpeg:hdrgm");
+    }
+#endif
   if (IsYCbCrCompatibleColorspace(image_info->colorspace) != MagickFalse)
     jpeg_info->out_color_space=JCS_YCbCr;
   /*
     Set image resolution.
   */
-  units=0;
-  if ((jpeg_info->saw_JFIF_marker != 0) && (jpeg_info->X_density != 1) &&
-      (jpeg_info->Y_density != 1))
+  if (jpeg_info->saw_JFIF_marker != 0)
     {
-      image->resolution.x=(double) jpeg_info->X_density;
-      image->resolution.y=(double) jpeg_info->Y_density;
-      units=(size_t) jpeg_info->density_unit;
+      if (jpeg_info->density_unit == 1)
+        image->units=PixelsPerInchResolution;
+      else if (jpeg_info->density_unit == 2)
+        image->units = PixelsPerCentimeterResolution;
+      if (IsAspectRatio(jpeg_info) == MagickFalse)
+        {
+          if (jpeg_info->X_density != 0)
+            image->resolution.x=(double) jpeg_info->X_density;
+          if (jpeg_info->Y_density != 0)
+            image->resolution.y=(double) jpeg_info->Y_density;
+        }
     }
-  if (units == 1)
-    image->units=PixelsPerInchResolution;
-  if (units == 2)
-    image->units=PixelsPerCentimeterResolution;
   number_pixels=(MagickSizeType) image->columns*image->rows;
   option=GetImageOption(image_info,"jpeg:size");
   if ((option != (const char *) NULL) &&
@@ -1241,12 +1726,21 @@ static Image *ReadOneJPEGImage(const ImageInfo *image_info,
       if ((geometry_info.sigma != 0.0) &&
           (scale_factor > (jpeg_info->output_height/geometry_info.sigma)))
         scale_factor=jpeg_info->output_height/geometry_info.sigma;
+#if defined(LIBJPEG_TURBO_VERSION_NUMBER) || (JPEG_LIB_VERSION >= 70)
+      jpeg_info->scale_num=(unsigned int) (8.0/scale_factor+0.5);
+      if (jpeg_info->scale_num > 16U)
+        jpeg_info->scale_num=16U;
+      if (jpeg_info->scale_num < 1U)
+        jpeg_info->scale_num=1U;
+      jpeg_info->scale_denom=8U;
+#else
       jpeg_info->scale_num=1U;
       jpeg_info->scale_denom=(unsigned int) scale_factor;
+#endif
       jpeg_calc_output_dimensions(jpeg_info);
       if (image->debug != MagickFalse)
         (void) LogMagickEvent(CoderEvent,GetMagickModule(),
-          "Scale factor: %.20g",(double) scale_factor);
+          "Scale factor: %.17g",(double) scale_factor);
     }
 #if (JPEG_LIB_VERSION >= 61) && defined(D_PROGRESSIVE_SUPPORTED)
 #if !defined(LIBJPEG_TURBO_VERSION_NUMBER) && defined(D_LOSSLESS_SUPPORTED)
@@ -1386,7 +1880,7 @@ static Image *ReadOneJPEGImage(const ImageInfo *image_info,
     }
   JPEGSetImageQuality(jpeg_info,image);
   JPEGSetImageSamplingFactor(jpeg_info,image,exception);
-  (void) FormatLocaleString(value,MagickPathExtent,"%.20g",(double)
+  (void) FormatLocaleString(value,MagickPathExtent,"%.17g",(double)
     jpeg_info->out_color_space);
   (void) SetImageProperty(image,"jpeg:colorspace",value,exception);
 #if defined(D_ARITH_CODING_SUPPORTED)
@@ -1413,7 +1907,7 @@ static Image *ReadOneJPEGImage(const ImageInfo *image_info,
       (jpeg_info->output_components != 4))
     {
       client_info=JPEGCleanup(jpeg_info,client_info);
-      ThrowReaderException(CorruptImageError,"ImageTypeNotSupported");
+      ThrowReaderException(ImageError,"ImageTypeNotSupported");
     }
   bytes_per_pixel=((size_t) jpeg_info->data_precision+7)/8;
   memory_info=AcquireVirtualMemory((size_t) image->columns,
@@ -1464,8 +1958,7 @@ static Image *ReadOneJPEGImage(const ImageInfo *image_info,
           image->colormap[i].alpha=(MagickRealType) OpaqueAlpha;
         }
     }
-  scale=65535U/(unsigned int) GetQuantumRange((size_t)
-    jpeg_info->data_precision);
+  range=GetQuantumRange(jpeg_info->data_precision);
   for (y=0; y < (ssize_t) image->rows; y++)
   {
     JDIMENSION
@@ -1480,31 +1973,25 @@ static Image *ReadOneJPEGImage(const ImageInfo *image_info,
     /*
       Uncompress one JPEG scanline.
     */
-    switch (jpeg_info->data_precision)
-    {
-      case 16:
+    if (jpeg_info->data_precision > 12)
       {
 #if defined(MAGICKCORE_HAVE_JPEG16_READ_SCANLINES)
         number_scanlines=jpeg16_read_scanlines(jpeg_info,(J16SAMPROW *)
           &jpeg_pixels,1);
-        break;
 #endif
       }
-      case 12:
+    else if (jpeg_info->data_precision > 8)
       {
 #if defined(MAGICKCORE_HAVE_JPEG12_READ_SCANLINES)
         number_scanlines=jpeg12_read_scanlines(jpeg_info,(J12SAMPROW *)
           &jpeg_pixels,1);
-        break;
 #endif
       }
-      default:
+    else
       {
         number_scanlines=jpeg_read_scanlines(jpeg_info,(JSAMPROW *)
           &jpeg_pixels,1);
-        break;
       }
-    }
     if (number_scanlines != 1)
       (void) ThrowMagickException(exception,GetMagickModule(),CorruptImageError,
         "AnErrorHasOccurredReadingFromFile","`%s'",image->filename);
@@ -1528,13 +2015,18 @@ static Image *ReadOneJPEGImage(const ImageInfo *image_info,
             index;
 
           unsigned short
-            pixel = (unsigned short) JPEGGetSample(jpeg_info,p);
+            pixel;
+
+          if (jpeg_info->data_precision > 8)
+            pixel=(*(unsigned short *) p);
+          else
+            pixel=(*(JSAMPLE *) p);
 
           index=(Quantum) ConstrainColormapIndex(image,pixel,exception);
           SetPixelViaPixelInfo(image,image->colormap+(ssize_t) index,q);
           SetPixelIndex(image,index,q);
-          p+=bytes_per_pixel;
-          q+=GetPixelChannels(image);
+          p+=(ptrdiff_t) bytes_per_pixel;
+          q+=(ptrdiff_t) GetPixelChannels(image);
         }
         break;
       }
@@ -1545,20 +2037,16 @@ static Image *ReadOneJPEGImage(const ImageInfo *image_info,
         */
         for (x=0; x < (ssize_t) image->columns; x++)
         {
-          SetPixelCyan(image,QuantumRange-ScaleShortToQuantum((unsigned short)
-            (scale*JPEGGetSample(jpeg_info,p))),q);
-          p+=bytes_per_pixel;
-          SetPixelMagenta(image,QuantumRange-ScaleShortToQuantum(
-            (unsigned short) (scale*JPEGGetSample(jpeg_info,p))),q);
-          p+=bytes_per_pixel;
-          SetPixelYellow(image,QuantumRange-ScaleShortToQuantum((unsigned short)
-            (scale*JPEGGetSample(jpeg_info,p))),q);
-          p+=bytes_per_pixel;
-          SetPixelBlack(image,QuantumRange-ScaleShortToQuantum((unsigned short)
-            (scale*JPEGGetSample(jpeg_info,p))),q);
-          p+=bytes_per_pixel;
+          SetPixelCyan(image,QuantumRange-JPEGGetQuantum(jpeg_info,range,p),q);
+          p+=(ptrdiff_t) bytes_per_pixel;
+          SetPixelMagenta(image,QuantumRange-JPEGGetQuantum(jpeg_info,range,p),q);
+          p+=(ptrdiff_t) bytes_per_pixel;
+          SetPixelYellow(image,QuantumRange-JPEGGetQuantum(jpeg_info,range,p),q);
+          p+=(ptrdiff_t) bytes_per_pixel;
+          SetPixelBlack(image,QuantumRange-JPEGGetQuantum(jpeg_info,range,p),q);
+          p+=(ptrdiff_t) bytes_per_pixel;
           SetPixelAlpha(image,OpaqueAlpha,q);
-          q+=GetPixelChannels(image);
+          q+=(ptrdiff_t) GetPixelChannels(image);
         }
         break;
       }
@@ -1569,17 +2057,14 @@ static Image *ReadOneJPEGImage(const ImageInfo *image_info,
         */
         for (x=0; x < (ssize_t) image->columns; x++)
         {
-          SetPixelRed(image,ScaleShortToQuantum((unsigned short) (scale*
-            JPEGGetSample(jpeg_info,p))),q);
-          p+=bytes_per_pixel;
-          SetPixelGreen(image,ScaleShortToQuantum((unsigned short) (scale*
-            JPEGGetSample(jpeg_info,p))),q);
-          p+=bytes_per_pixel;
-          SetPixelBlue(image,ScaleShortToQuantum((unsigned short) (scale*
-            JPEGGetSample(jpeg_info,p))),q);
-          p+=bytes_per_pixel;
+          SetPixelRed(image,JPEGGetQuantum(jpeg_info,range,p),q);
+          p+=(ptrdiff_t) bytes_per_pixel;
+          SetPixelGreen(image,JPEGGetQuantum(jpeg_info,range,p),q);
+          p+=(ptrdiff_t) bytes_per_pixel;
+          SetPixelBlue(image,JPEGGetQuantum(jpeg_info,range,p),q);
+          p+=(ptrdiff_t) bytes_per_pixel;
           SetPixelAlpha(image,OpaqueAlpha,q);
-          q+=GetPixelChannels(image);
+          q+=(ptrdiff_t) GetPixelChannels(image);
         }
         break;
       }
@@ -1632,6 +2117,9 @@ static MagickBooleanType ReadMPOImages(const ImageInfo *image_info,
     count,
     j = 0;
 
+  MagickBooleanType
+    is_blob_readable;
+
   unsigned char
     alt_signature[SIGNATURE_SIZE] = {0xff, 0xd8, 0xff, 0xe1},
     buffer[BUFFER_SIZE],
@@ -1647,8 +2135,10 @@ static MagickBooleanType ReadMPOImages(const ImageInfo *image_info,
       image=DestroyImageList(image);
       return(MagickFalse);
     }
+  is_blob_readable=MagickTrue;
   (void) SeekBlob(image,offset,SEEK_SET);
-  while ((count=ReadBlob(image,BUFFER_SIZE,buffer)) != 0)
+  while ((is_blob_readable != MagickFalse) &&
+         (count=ReadBlob(image,BUFFER_SIZE,buffer)) != 0)
   {
     ssize_t
       i;
@@ -1671,6 +2161,7 @@ static MagickBooleanType ReadMPOImages(const ImageInfo *image_info,
       offset+=i-SIGNATURE_SIZE+1;
       old_offset=offset;
       (void) CloseBlob(image);
+      is_blob_readable=MagickFalse;
       jpeg_image=ReadOneJPEGImage(image_info,jpeg_info,&offset,exception);
       if (jpeg_image != (Image *) NULL)
         AppendImageToList(&images,jpeg_image);
@@ -1679,6 +2170,7 @@ static MagickBooleanType ReadMPOImages(const ImageInfo *image_info,
       status=OpenBlob(image_info,image,ReadBinaryBlobMode,exception);
       if (status == MagickFalse)
         break;
+      is_blob_readable=MagickTrue;
       (void) SeekBlob(image,offset,SEEK_SET);
       count=0;
       j=0;
@@ -2113,8 +2605,12 @@ static QuantizationTable *GetQuantizationTable(const char *filename,
   table->levels=(unsigned int *) AcquireQuantumMemory(length,
     sizeof(*table->levels));
   if (table->levels == (unsigned int *) NULL)
-    ThrowFatalException(ResourceLimitFatalError,
-      "UnableToAcquireQuantizationTable");
+    {
+      quantization_tables=DestroyXMLTree(quantization_tables);
+      table=DestroyQuantizationTable(table);
+      xml=DestroyString(xml);
+      return(table);
+    }
   for (i=0; i < (ssize_t) (table->width*table->height); i++)
   {
     table->levels[i]=(unsigned int) (InterpretLocaleValue(content,&p)/
@@ -2212,12 +2708,12 @@ static void WriteProfiles(j_compress_ptr jpeg_info,Image *image,
         int
           marker;
 
-        marker=JPEG_APP0+StringToInteger(name+3);
+        marker=APP_MARKER+StringToInteger(name+3);
         for (i=0; i < (ssize_t) length; i+=65533L)
            jpeg_write_marker(jpeg_info,marker,GetStringInfoDatum(profile)+i,
-             MagickMin((unsigned int) length-i,65533L));
+             MagickMin((unsigned int) (length-i),65533));
       }
-    if ((LocaleCompare(name,"EXIF") == 0) && (length < 65533L))
+    else if (LocaleCompare(name,"EXIF") == 0)
       {
         if (length > 65533L)
           (void) ThrowMagickException(exception,GetMagickModule(),CoderWarning,
@@ -2226,7 +2722,7 @@ static void WriteProfiles(j_compress_ptr jpeg_info,Image *image,
           jpeg_write_marker(jpeg_info,APP_MARKER+1,GetStringInfoDatum(profile),
             (unsigned int) length);
       }
-    if (LocaleCompare(name,"ICC") == 0)
+    else if (LocaleCompare(name,"ICC") == 0)
       {
         unsigned char
           *p;
@@ -2247,7 +2743,7 @@ static void WriteProfiles(j_compress_ptr jpeg_info,Image *image,
             custom_profile),(unsigned int) (length+tag_length+3));
         }
       }
-    if (((LocaleCompare(name,"IPTC") == 0) ||
+    else if (((LocaleCompare(name,"IPTC") == 0) ||
         (LocaleCompare(name,"8BIM") == 0)) && (iptc == MagickFalse))
       {
         size_t
@@ -2283,7 +2779,7 @@ static void WriteProfiles(j_compress_ptr jpeg_info,Image *image,
             custom_profile),(unsigned int) (length+tag_length+roundup));
         }
       }
-    if (LocaleCompare(name,"XMP") == 0)
+    else if (LocaleCompare(name,"XMP") == 0)
       {
         StringInfo
           *xmp_profile;
@@ -2298,12 +2794,12 @@ static void WriteProfiles(j_compress_ptr jpeg_info,Image *image,
         length=GetStringInfoLength(xmp_profile);
         for (i=0; i < (ssize_t) length; i+=65533L)
           jpeg_write_marker(jpeg_info,APP_MARKER+1,GetStringInfoDatum(
-            xmp_profile)+i,MagickMin((unsigned int) length-i,65533L));
+            xmp_profile)+i,MagickMin((unsigned int) (length-i),65533));
         xmp_profile=DestroyStringInfo(xmp_profile);
       }
     if (image->debug != MagickFalse)
       (void) LogMagickEvent(CoderEvent,GetMagickModule(),
-        "%s profile: %.20g bytes",name,(double) GetStringInfoLength(profile));
+        "%s profile: %.17g bytes",name,(double) GetStringInfoLength(profile));
     name=GetNextImageProfile(image);
   }
   custom_profile=DestroyStringInfo(custom_profile);
@@ -2344,7 +2840,7 @@ static char **SamplingFactorToList(const char *text)
   textlist=(char **) AcquireQuantumMemory((size_t) MAX_COMPONENTS,
     sizeof(*textlist));
   if (textlist == (char **) NULL)
-    ThrowFatalException(ResourceLimitFatalError,"UnableToConvertText");
+    return((char **) NULL);
   p=text;
   for (i=0; i < (ssize_t) MAX_COMPONENTS; i++)
   {
@@ -2354,7 +2850,15 @@ static char **SamplingFactorToList(const char *text)
     textlist[i]=(char *) AcquireQuantumMemory((size_t) (q-p)+MagickPathExtent,
       sizeof(*textlist[i]));
     if (textlist[i] == (char *) NULL)
-      ThrowFatalException(ResourceLimitFatalError,"UnableToConvertText");
+      {
+        ssize_t
+          j;
+
+        for (j=0; j < i; j++)
+          textlist[j]=DestroyString(textlist[j]);
+        textlist=(char **) RelinquishMagickMemory(textlist);
+        return(textlist);
+      }
     (void) CopyMagickString(textlist[i],p,(size_t) (q-p+1));
     if (*q == '\r')
       q++;
@@ -2368,11 +2872,16 @@ static char **SamplingFactorToList(const char *text)
 }
 
 static inline void JPEGSetSample(const struct jpeg_compress_struct *jpeg_info,
-  const unsigned int scale,const Quantum pixel,JSAMPLE *q)
+  const Quantum pixel,QuantumAny range,JSAMPLE *q)
 {
-  if (jpeg_info->data_precision > 8)
-    (*(unsigned short *) q)=(ScaleQuantumToShort(pixel)/scale);
-  *q=(JSAMPLE) ScaleQuantumToChar(pixel);
+  if (jpeg_info->data_precision == 8)
+    *q=(JSAMPLE) ScaleQuantumToChar(pixel);
+  else if (jpeg_info->data_precision == 16)
+    (*(unsigned short *) q)=(unsigned short) ScaleQuantumToShort(pixel);
+  else if (jpeg_info->data_precision < 8)
+    *q=(JSAMPLE) ScaleQuantumToAny(pixel,range);
+  else
+    (*(unsigned short *) q)=(unsigned short) ScaleQuantumToAny(pixel,range);
 }
 
 static MagickBooleanType WriteJPEGImage_(const ImageInfo *image_info,
@@ -2414,6 +2923,9 @@ static MagickBooleanType WriteJPEGImage_(const ImageInfo *image_info,
   MemoryInfo
     *memory_info;
 
+  QuantumAny
+    range;
+
   ssize_t
     bytes_per_pixel,
     i,
@@ -2421,9 +2933,6 @@ static MagickBooleanType WriteJPEGImage_(const ImageInfo *image_info,
 
   struct jpeg_error_mgr
     jpeg_error;
-
-  unsigned int
-    scale;
 
   /*
     Open image file.
@@ -2460,13 +2969,13 @@ static MagickBooleanType WriteJPEGImage_(const ImageInfo *image_info,
   (void) memset(client_info,0,sizeof(*client_info));
   (void) memset(jpeg_info,0,sizeof(*jpeg_info));
   (void) memset(&jpeg_error,0,sizeof(jpeg_error));
-  volatile_image=image;
-  jpeg_info->client_data=(void *) volatile_image;
   jpeg_info->err=jpeg_std_error(&jpeg_error);
   jpeg_info->err->emit_message=(void (*)(j_common_ptr,int)) JPEGWarningHandler;
   jpeg_info->err->error_exit=(void (*)(j_common_ptr)) JPEGErrorHandler;
   client_info->exception=exception;
+  volatile_image=image;
   client_info->image=volatile_image;
+  jpeg_info->client_data=(void *) client_info;
   memory_info=(MemoryInfo *) NULL;
   if (setjmp(client_info->error_recovery) != 0)
     {
@@ -2477,7 +2986,6 @@ static MagickBooleanType WriteJPEGImage_(const ImageInfo *image_info,
         jps_image=DestroyImage(jps_image);
       return(MagickFalse);
     }
-  jpeg_info->client_data=(void *) client_info;
   jpeg_create_compress(jpeg_info);
   JPEGDestinationManager(jpeg_info,image);
   if ((image->columns != (unsigned int) image->columns) ||
@@ -2487,15 +2995,31 @@ static MagickBooleanType WriteJPEGImage_(const ImageInfo *image_info,
   jpeg_info->image_height=(unsigned int) image->rows;
   jpeg_info->input_components=3;
   jpeg_info->data_precision=8;
-#if defined(C_LOSSLESS_SUPPORTED)
-  if (image_info->compression == LosslessJPEGCompression)
+  option=GetImageOption(image_info,"jpeg:high-bit-depth");
+  if (IsStringTrue(option) != MagickFalse)
     {
-      if (image->depth > 8)
-        jpeg_info->data_precision=12;
-      if (image->depth > 12)
-        jpeg_info->data_precision=16;
-    }
+#if defined(C_LOSSLESS_SUPPORTED)
+      if (image_info->compression == LosslessJPEGCompression)
+        {
+#if defined(LIBJPEG_TURBO_VERSION_NUMBER) && LIBJPEG_TURBO_VERSION_NUMBER >= 3000090
+          if (image_info->quality >= 100)
+            jpeg_info->data_precision=(int) image->depth;
+          else
 #endif
+          if (image->depth > 12)
+            jpeg_info->data_precision=16;
+          else if (image->depth > 8)
+            jpeg_info->data_precision=12;
+        }
+      else
+#endif
+        {
+#if defined(MAGICKCORE_HAVE_JPEG12_WRITE_SCANLINES)
+          if (image->depth > 8)
+            jpeg_info->data_precision=12;
+#endif
+        }
+    }
   jpeg_info->in_color_space=JCS_RGB;
   switch (image->colorspace)
   {
@@ -2536,11 +3060,14 @@ static MagickBooleanType WriteJPEGImage_(const ImageInfo *image_info,
     }
   }
   jpeg_set_defaults(jpeg_info);
+  option=GetImageOption(image_info,"jpeg:restart-interval");
+  if (option != (const char *) NULL)
+    jpeg_info->restart_interval=StringToInteger(option);
   if (jpeg_info->in_color_space == JCS_CMYK)
     jpeg_set_colorspace(jpeg_info,JCS_YCCK);
   if (image->debug != MagickFalse)
     (void) LogMagickEvent(CoderEvent,GetMagickModule(),
-      "Image resolution: %.20g,%.20g",image->resolution.x,image->resolution.y);
+      "Image resolution: %.17g,%.17g",image->resolution.x,image->resolution.y);
   if ((image->resolution.x > 0) && (image->resolution.x < (double) SHRT_MAX) &&
       (image->resolution.y > 0) && (image->resolution.y < (double) SHRT_MAX))
     {
@@ -2650,7 +3177,7 @@ static MagickBooleanType WriteJPEGImage_(const ImageInfo *image_info,
       if (image->quality != UndefinedCompressionQuality)
         quality=(int) image->quality;
       if (image->debug != MagickFalse)
-        (void) LogMagickEvent(CoderEvent,GetMagickModule(),"Quality: %.20g",
+        (void) LogMagickEvent(CoderEvent,GetMagickModule(),"Quality: %.17g",
           (double) image->quality);
     }
   else
@@ -2727,7 +3254,7 @@ static MagickBooleanType WriteJPEGImage_(const ImageInfo *image_info,
             status=WriteJPEGImage(extent_info,jpeg_image,exception);
             (void) RelinquishUniqueFileResource(jpeg_image->filename);
             if (status == MagickFalse)
-              continue;
+              break;
             if (GetBlobSize(jpeg_image) <= extent)
               minimum=jpeg_image->quality+1;
             else
@@ -2900,11 +3427,11 @@ static MagickBooleanType WriteJPEGImage_(const ImageInfo *image_info,
       else
         (void) LogMagickEvent(CoderEvent,GetMagickModule(),
           "Storage class: DirectClass");
-      (void) LogMagickEvent(CoderEvent,GetMagickModule(),"Depth: %.20g",
+      (void) LogMagickEvent(CoderEvent,GetMagickModule(),"Depth: %.17g",
         (double) image->depth);
       if (image->colors != 0)
         (void) LogMagickEvent(CoderEvent,GetMagickModule(),
-          "Number of colors: %.20g",(double) image->colors);
+          "Number of colors: %.17g",(double) image->colors);
       else
         (void) LogMagickEvent(CoderEvent,GetMagickModule(),
           "Number of colors: unspecified");
@@ -3004,8 +3531,7 @@ static MagickBooleanType WriteJPEGImage_(const ImageInfo *image_info,
         jps_image=DestroyImage(jps_image);
       return(MagickFalse);
     }
-  scale=65535U/(unsigned short) GetQuantumRange((size_t)
-    jpeg_info->data_precision);
+  range=GetQuantumRange(jpeg_info->data_precision);
   for (y=0; y < (ssize_t) image->rows; y++)
   {
     const Quantum
@@ -3033,10 +3559,10 @@ static MagickBooleanType WriteJPEGImage_(const ImageInfo *image_info,
         */
         for (x=0; x < (ssize_t) image->columns; x++)
         {
-          JPEGSetSample(jpeg_info,scale,ClampToQuantum(GetPixelLuma(image,p)),
+          JPEGSetSample(jpeg_info,ClampToQuantum(GetPixelLuma(image,p)),range,
             q);
-          q+=bytes_per_pixel;
-          p+=GetPixelChannels(image);
+          q+=(ptrdiff_t) bytes_per_pixel;
+          p+=(ptrdiff_t) GetPixelChannels(image);
         }
         break;
       }
@@ -3050,19 +3576,19 @@ static MagickBooleanType WriteJPEGImage_(const ImageInfo *image_info,
           /*
             Convert DirectClass packets to contiguous CMYK scanlines.
           */
-          JPEGSetSample(jpeg_info,scale,(Quantum) ((QuantumRange-
-            GetPixelCyan(image,p))),q);
-          q+=bytes_per_pixel;
-          JPEGSetSample(jpeg_info,scale,(Quantum) ((QuantumRange-
-            GetPixelMagenta(image,p))),q);
-          q+=bytes_per_pixel;
-          JPEGSetSample(jpeg_info,scale,(Quantum) ((QuantumRange-
-            GetPixelYellow(image,p))),q);
-          q+=bytes_per_pixel;
-          JPEGSetSample(jpeg_info,scale,(Quantum) ((QuantumRange-
-            GetPixelBlack(image,p))),q);
-          q+=bytes_per_pixel;
-          p+=GetPixelChannels(image);
+          JPEGSetSample(jpeg_info,(Quantum) ((QuantumRange-
+            GetPixelCyan(image,p))),range,q);
+          q+=(ptrdiff_t) bytes_per_pixel;
+          JPEGSetSample(jpeg_info,(Quantum) ((QuantumRange-
+            GetPixelMagenta(image,p))),range,q);
+          q+=(ptrdiff_t) bytes_per_pixel;
+          JPEGSetSample(jpeg_info,(Quantum) ((QuantumRange-
+            GetPixelYellow(image,p))),range,q);
+          q+=(ptrdiff_t) bytes_per_pixel;
+          JPEGSetSample(jpeg_info,(Quantum) ((QuantumRange-
+            GetPixelBlack(image,p))),range,q);
+          q+=(ptrdiff_t) bytes_per_pixel;
+          p+=(ptrdiff_t) GetPixelChannels(image);
         }
         break;
       }
@@ -3073,13 +3599,13 @@ static MagickBooleanType WriteJPEGImage_(const ImageInfo *image_info,
         */
         for (x=0; x < (ssize_t) image->columns; x++)
         {
-          JPEGSetSample(jpeg_info,scale,GetPixelRed(image,p),q);
-          q+=bytes_per_pixel;
-          JPEGSetSample(jpeg_info,scale,GetPixelGreen(image,p),q);
-          q+=bytes_per_pixel;
-          JPEGSetSample(jpeg_info,scale,GetPixelBlue(image,p),q);
-          q+=bytes_per_pixel;
-          p+=GetPixelChannels(image);
+          JPEGSetSample(jpeg_info,GetPixelRed(image,p),range,q);
+          q+=(ptrdiff_t) bytes_per_pixel;
+          JPEGSetSample(jpeg_info,GetPixelGreen(image,p),range,q);
+          q+=(ptrdiff_t) bytes_per_pixel;
+          JPEGSetSample(jpeg_info,GetPixelBlue(image,p),range,q);
+          q+=(ptrdiff_t) bytes_per_pixel;
+          p+=(ptrdiff_t) GetPixelChannels(image);
         }
         break;
       }
@@ -3087,34 +3613,29 @@ static MagickBooleanType WriteJPEGImage_(const ImageInfo *image_info,
     /*
       Compress one JPEG scanline.
     */
-    switch (jpeg_info->data_precision)
-    {
-      case 16:
+    if (jpeg_info->data_precision > 12)
       {
 #if defined(MAGICKCORE_HAVE_JPEG16_WRITE_SCANLINES)
         number_scanlines=jpeg16_write_scanlines(jpeg_info,(J16SAMPROW *)
           &jpeg_pixels,1);
-        break;
 #endif
       }
-      case 12:
+    else if (jpeg_info->data_precision > 8)
       {
 #if defined(MAGICKCORE_HAVE_JPEG12_WRITE_SCANLINES)
         number_scanlines=jpeg12_write_scanlines(jpeg_info,(J12SAMPROW *)
           &jpeg_pixels,1);
-        break;
 #endif
       }
-      default:
+    else
       {
         number_scanlines=jpeg_write_scanlines(jpeg_info,(JSAMPROW *)
           &jpeg_pixels,1);
-        break;
       }
-    }
     if (number_scanlines != 1)
-      (void) ThrowMagickException(exception,GetMagickModule(),CorruptImageError,
-        "AnErrorHasOccurredWritingToFile","`%s'",image->filename);
+      (void) ThrowMagickException(exception,GetMagickModule(),
+        CorruptImageError,"AnErrorHasOccurredWritingToFile","`%s'",
+        image->filename);
     status=SetImageProgress(image,SaveImageTag,(MagickOffsetType) y,
       image->rows);
     if (status == MagickFalse)
@@ -3140,6 +3661,13 @@ static MagickBooleanType WriteJPEGImage(const ImageInfo *image_info,
   struct jpeg_compress_struct
     jpeg_info;
 
+#if defined(MAGICKCORE_UHDR_DELEGATE)
+  if ((GetImageProfile(image,"hdrgm") != (const StringInfo *) NULL) &&
+      (GetImageOption(image_info,"jpeg:extent") == (const char *) NULL) &&
+      (IsUltraHDRJPEGAutoRoutingEnabled(image_info,WritePolicyRights) !=
+        MagickFalse))
+    return(WriteUltraHDRJPEGImage(image_info,image,exception));
+#endif
   return(WriteJPEGImage_(image_info,image,&jpeg_info,exception));
 }
 #endif

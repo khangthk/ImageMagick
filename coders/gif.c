@@ -23,7 +23,7 @@
 %  You may not use this file except in compliance with the License.  You may  %
 %  obtain a copy of the License at                                            %
 %                                                                             %
-%    https://imagemagick.org/script/license.php                               %
+%    https://imagemagick.org/license/                                         %
 %                                                                             %
 %  Unless required by applicable law or agreed to in writing, software        %
 %  distributed under the License is distributed on an "AS IS" BASIS,          %
@@ -449,7 +449,7 @@ static MagickBooleanType DecodeImage(Image *image,const ssize_t opacity,
       SetPixelViaPixelInfo(image,image->colormap+index,q);
       SetPixelAlpha(image,index == opacity ? TransparentAlpha : OpaqueAlpha,q);
       x++;
-      q+=GetPixelChannels(image);
+      q+=(ptrdiff_t) GetPixelChannels(image);
     }
     if (SyncAuthenticPixels(image,exception) == MagickFalse)
       break;
@@ -666,7 +666,7 @@ static MagickBooleanType EncodeImage(const ImageInfo *image_info,Image *image,
     if (y == 0)
       {
         waiting_code=(short) GetPixelIndex(image,p);
-        p+=GetPixelChannels(image);
+        p+=(ptrdiff_t) GetPixelChannels(image);
       }
     for (x=(ssize_t) (y == 0 ? 1 : 0); x < (ssize_t) image->columns; x++)
     {
@@ -676,7 +676,7 @@ static MagickBooleanType EncodeImage(const ImageInfo *image_info,Image *image,
       next_pixel=MagickFalse;
       displacement=1;
       index=(Quantum) ((size_t) GetPixelIndex(image,p) & 0xff);
-      p+=GetPixelChannels(image);
+      p+=(ptrdiff_t) GetPixelChannels(image);
       k=(ssize_t) (((size_t) index << (MaxGIFBits-8))+(size_t) waiting_code);
       if (k >= MaxHashTable)
         k-=MaxHashTable;
